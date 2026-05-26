@@ -14,5 +14,6 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\18980\\Documents\\GitHub\\TWS-Doctor\\firmware_esp32s3\\build"
-  ]
+  ],
+  "idf.flashType": "UART"
 }

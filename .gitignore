@@ -1,0 +1,13 @@
+*.pyc
+__pycache__/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.iml
+build/
+sdkconfig.old
+managed_components/
+pc_client_pyqt/logs/*
+firmware_esp32s3/build/*
+firmware_esp32s3/sdkconfig.old
