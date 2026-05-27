@@ -18,6 +18,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
 #include "esp_gatt_common_api.h"
+#include "uart_protocol.h"
 #include <string.h>
 
 /* 日志标签 */
@@ -276,10 +277,14 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
                 memcpy(g_target_addr, param->open.remote_bda, sizeof(esp_bd_addr_t));
                 update_state(BLE_GATTC_STATE_CONNECTED);
                 
+                /* 发送 Bose 连接成功通知到上位机 */
+                uart_protocol_send_bose_connected("Bose TWS Device", "Unknown");
+                
                 /* 开始发现服务 */
                 discover_all_services();
             } else {
                 ESP_LOGE(TAG, "Open failed, status=%d", param->open.status);
+                uart_protocol_send_bose_error("Connection failed");
                 update_state(BLE_GATTC_STATE_IDLE);
             }
             break;
@@ -297,6 +302,9 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             g_is_connected = false;
             g_service_count = 0;
             update_state(BLE_GATTC_STATE_DISCONNECTED);
+            
+            /* 发送 Bose 断开连接通知到上位机 */
+            uart_protocol_send_bose_disconnected();
             break;
         }
         

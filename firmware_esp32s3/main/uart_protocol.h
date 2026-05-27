@@ -20,6 +20,12 @@
  * - GATTC|DISCONNECTED
  * - GATTC|SERVICE|UUID
  * - GATTC|CHAR|UUID|PROPS
+ * - BOSE|CONNECTED|设备名称|设备型号
+ * - BOSE|DISCONNECTED
+ * - BOSE|BATT|左耳电量|右耳电量
+ * - BOSE|FW|固件版本|设备型号
+ * - BOSE|CLEAR_PAIRING|OK/FAIL
+ * - BOSE|ERROR|错误信息
  * 
  * PC → ESP32 命令:
  * - CMD|SCAN_START|数量  (数量为0表示不限制)
@@ -31,6 +37,11 @@
  * - CMD|GATTC_READ|UUID
  * - CMD|GATTC_WRITE|UUID|HEX_DATA
  * - CMD|GATTC_NOTIFY|UUID|ENABLE
+ * - CMD|BOSE_CONNECT|MAC地址
+ * - CMD|BOSE_DISCONNECT
+ * - CMD|BOSE_CLEAR_PAIRING
+ * - CMD|BOSE_READ_BATT
+ * - CMD|BOSE_READ_FW
  */
 
 #ifndef UART_PROTOCOL_H
@@ -43,16 +54,21 @@
  * @brief 串口命令类型枚举
  */
 typedef enum {
-    CMD_SCAN_START,       /*!< 开始扫描命令 */
-    CMD_SCAN_STOP,        /*!< 停止扫描命令 */
-    CMD_REPAIR_START,     /*!< 开始修复命令 */
-    CMD_REPAIR_STOP,      /*!< 停止修复命令 */
-    CMD_GATTC_CONNECT,    /*!< GATTC 连接命令 */
-    CMD_GATTC_DISCONNECT, /*!< GATTC 断开命令 */
-    CMD_GATTC_READ,       /*!< GATTC 读取命令 */
-    CMD_GATTC_WRITE,      /*!< GATTC 写入命令 */
-    CMD_GATTC_NOTIFY,     /*!< GATTC Notify 设置命令 */
-    CMD_UNKNOWN           /*!< 未知命令 */
+    CMD_SCAN_START,         /*!< 开始扫描命令 */
+    CMD_SCAN_STOP,          /*!< 停止扫描命令 */
+    CMD_REPAIR_START,       /*!< 开始修复命令 */
+    CMD_REPAIR_STOP,        /*!< 停止修复命令 */
+    CMD_GATTC_CONNECT,      /*!< GATTC 连接命令 */
+    CMD_GATTC_DISCONNECT,   /*!< GATTC 断开命令 */
+    CMD_GATTC_READ,         /*!< GATTC 读取命令 */
+    CMD_GATTC_WRITE,        /*!< GATTC 写入命令 */
+    CMD_GATTC_NOTIFY,       /*!< GATTC Notify 设置命令 */
+    CMD_BOSE_CONNECT,       /*!< Bose 设备连接命令 */
+    CMD_BOSE_DISCONNECT,    /*!< Bose 设备断开命令 */
+    CMD_BOSE_CLEAR_PAIRING, /*!< Bose 清空配对命令 */
+    CMD_BOSE_READ_BATT,     /*!< Bose 读取电池命令 */
+    CMD_BOSE_READ_FW,       /*!< Bose 读取固件命令 */
+    CMD_UNKNOWN             /*!< 未知命令 */
 } uart_cmd_t;
 
 /**
@@ -134,5 +150,49 @@ esp_err_t uart_protocol_send_scan_status(bool scanning, int count);
  * @param callback 回调函数指针
  */
 void uart_protocol_set_callback(uart_cmd_callback_t callback);
+
+/**
+ * @brief 发送Bose设备连接成功通知到上位机
+ * @param name 设备名称
+ * @param model 设备型号
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_connected(const char *name, const char *model);
+
+/**
+ * @brief 发送Bose设备断开连接通知到上位机
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_disconnected(void);
+
+/**
+ * @brief 发送Bose设备电池信息到上位机
+ * @param left_level 左耳电量百分比
+ * @param right_level 右耳电量百分比
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_battery(int left_level, int right_level);
+
+/**
+ * @brief 发送Bose设备固件信息到上位机
+ * @param version 固件版本号
+ * @param model 设备型号
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_firmware(const char *version, const char *model);
+
+/**
+ * @brief 发送Bose设备清空配对结果到上位机
+ * @param success 是否成功
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_clear_pairing(bool success);
+
+/**
+ * @brief 发送Bose设备错误信息到上位机
+ * @param message 错误信息
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_error(const char *message);
 
 #endif

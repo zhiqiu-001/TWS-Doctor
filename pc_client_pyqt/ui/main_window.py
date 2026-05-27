@@ -17,8 +17,22 @@ from PyQt6.QtGui import QFont
 
 from ui.pages.scan_page import ScanPage
 from ui.pages.repair_page import RepairPage
+from ui.pages.bose_tws_page import BoseTWSPage
 from ui.pages.log_page import LogPage
 from ui.widgets.status_indicator import StatusIndicator
+from ui.styles.main_style import STYLE_SHEET
+
+import logging
+
+# 在程序初始化时配置
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),  # 写入文件
+        logging.StreamHandler()  # 输出到控制台（如果有）
+    ]
+)
 
 
 class SerialReaderThread(QThread):
@@ -38,6 +52,7 @@ class SerialReaderThread(QThread):
                     data = self._serial.readline().decode('utf-8', errors='ignore').strip()
                     if data:
                         # 尝试解析协议包
+                        logging.debug(f"Received: {data}")
                         from core.protocol import parse_packet, PacketType
                         try:
                             packet_type, parsed_data = parse_packet(data)
@@ -51,208 +66,6 @@ class SerialReaderThread(QThread):
     
     def stop(self):
         self._running = False
-
-
-# ========== 全局样式（贴近设计稿深色风格） ==========
-STYLE_SHEET = """
-/* 全局 */
-QMainWindow {
-    background-color: #0F1118;
-}
-QWidget {
-    color: #E2E8F0;
-    font-family: "Microsoft YaHei", sans-serif;
-    background-color: #0F1118;
-}
-/* 顶部标题栏 */
-#TitleBar {
-    background-color: #1A1D29;
-    border-bottom: 1px solid #2D3142;
-}
-#TitleLabel {
-    font-size: 18px;
-    font-weight: bold;
-    color: #FFFFFF;
-}
-/* 卡片 */
-#Card {
-    background-color: #1A1D29;
-    border-radius: 8px;
-    border: 1px solid #2D3142;
-}
-/* 按钮 */
-QPushButton {
-    background-color: #2563EB;
-    border: none;
-    border-radius: 6px;
-    padding: 6px 12px;
-    color: white;
-    font-weight: 500;
-}
-QPushButton:hover {
-    background-color: #3B82F6;
-}
-QPushButton:pressed {
-    background-color: #1D4ED8;
-}
-QPushButton:disabled {
-    background-color: #334155;
-    color: #94A3B8;
-}
-/* 下拉框 */
-QComboBox {
-    background-color: #1A1D29;
-    border: 1px solid #2D3142;
-    border-radius: 6px;
-    padding: 4px 8px;
-    color: #E2E8F0;
-}
-QComboBox::drop-down {
-    border: none;
-}
-QComboBox::down-arrow {
-    color: #E2E8F0;
-}
-/* 下拉弹出窗口容器 */
-QComboBox QAbstractItemView {
-    background-color: #1A1D29;
-    border: none;
-    border-radius: 6px;
-    color: #E2E8F0;
-    selection-background-color: #2563EB;
-    show-decoration-selected: 1;
-    outline: none;
-}
-QComboBox QAbstractItemView::item {
-    padding: 4px 8px;
-    min-height: 24px;
-    border-radius: 4px;
-    margin: 2px;
-}
-QComboBox QAbstractItemView::item:hover {
-    background-color: #3B82F6;
-    color: white;
-}
-QComboBox QAbstractItemView::item:selected {
-    background-color: #2563EB;
-    color: white;
-    font-weight: bold;
-}
-/* 移除滚动区域边框 */
-QComboBox QAbstractScrollArea {
-    border: none;
-    background-color: transparent;
-}
-QComboBox QScrollBar:vertical {
-    background-color: #1A1D29;
-    width: 8px;
-}
-QComboBox QScrollBar::handle:vertical {
-    background-color: #3B82F6;
-    border-radius: 4px;
-}
-/* Tab */
-QTabWidget {
-    background-color: #0F1118;
-}
-QTabWidget::pane {
-    border: none;
-    background-color: #0F1118;
-}
-QTabBar::tab {
-    background-color: #1A1D29;
-    padding: 8px 16px;
-    margin-right: 4px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-}
-QTabBar::tab:selected {
-    background-color: #2563EB;
-    color: white;
-}
-/* 状态栏 */
-QStatusBar {
-    background-color: #1A1D29;
-    color: #94A3B8;
-}
-/* 标签文字 */
-QLabel#SubLabel {
-    color: #94A3B8;
-    font-size: 12px;
-}
-/* 分组框 */
-QGroupBox {
-    background-color: #161B22;
-    border: 1px solid #30363D;
-    border-radius: 6px;
-    margin-top: 0.5em;
-}
-QGroupBox::title {
-    color: #8B949E;
-    font-weight: 600;
-    padding-left: 8px;
-    padding-right: 8px;
-}
-/* 表格 */
-QTableWidget {
-    background-color: #161B22;
-    border: 1px solid #30363D;
-    border-radius: 6px;
-    gridline-color: #21262D;
-}
-QTableWidget::item {
-    background-color: #161B22;
-    color: #E2E8F0;
-}
-QTableWidget::item:selected {
-    background-color: #238636;
-    color: white;
-}
-QHeaderView::section {
-    background-color: #21262D;
-    color: #8B949E;
-    border: none;
-    padding: 4px;
-    font-weight: 600;
-}
-/* 文本框 */
-QLineEdit {
-    background-color: #161B22;
-    border: 1px solid #30363D;
-    border-radius: 6px;
-    padding: 4px 8px;
-    color: #E2E8F0;
-}
-QLineEdit::placeholder {
-    color: #484F58;
-}
-/* 数字输入框 */
-QSpinBox {
-    background-color: #161B22;
-    border: 1px solid #30363D;
-    border-radius: 6px;
-    color: #E2E8F0;
-}
-QSpinBox::up-button, QSpinBox::down-button {
-    background-color: #21262D;
-    border: none;
-}
-/* 文本编辑器 */
-QTextEdit {
-    background-color: #0D1117;
-    border: 1px solid #30363D;
-    border-radius: 6px;
-    color: #E2E8F0;
-}
-QTextEdit QScrollBar:vertical {
-    background-color: #161B22;
-    width: 8px;
-}
-QTextEdit QScrollBar::handle:vertical {
-    background-color: #30363D;
-    border-radius: 4px;
-}
-"""
 
 
 class MainWindow(QMainWindow):
@@ -425,6 +238,15 @@ class MainWindow(QMainWindow):
         self._repair_page.device_selected.connect(self._on_device_selected)
         self._tab_widget.addTab(self._repair_page, "修复工具")
 
+        self._bose_tws_page = BoseTWSPage()
+        self._bose_tws_page.connect_device.connect(self._on_bose_connect)
+        self._bose_tws_page.disconnect_device.connect(self._on_bose_disconnect)
+        self._bose_tws_page.clear_pairing.connect(self._on_bose_clear_pairing)
+        self._bose_tws_page.read_battery.connect(self._on_bose_read_battery)
+        self._bose_tws_page.read_firmware.connect(self._on_bose_read_firmware)
+        self._bose_tws_page.log_clear.connect(self._clear_logs)
+        self._tab_widget.addTab(self._bose_tws_page, "Bose TWS 辅助")
+
         self._log_page = LogPage()
         self._log_page.log_search.connect(self._search_logs_full)
         self._log_page.log_export.connect(self._export_logs)
@@ -485,6 +307,7 @@ class MainWindow(QMainWindow):
         self._hint_label.setText(f"已连接到 {port_name}")
         self._scan_page.set_scan_enabled(True)
         self._repair_page.set_enabled(True)
+        self._bose_tws_page.set_scan_enabled(True)
         self.add_log("SUCCESS", f"串口 {port_name} 打开成功")
         self.add_log("SUCCESS", "ESP32 设备连接成功")
     
@@ -551,6 +374,37 @@ class MainWindow(QMainWindow):
         elif packet_type == PacketType.STATUS_IDLE:
             self._scan_count = 0
             self._scan_page.update_scan_count(0)
+        
+        # Bose TWS 辅助工具协议处理
+        elif packet_type == PacketType.BOSE_CONNECTED:
+            device_info = {
+                "name": data.get("name", "Unknown"),
+                "model": data.get("model", "")
+            }
+            self._bose_tws_page.set_connected(device_info)
+            self.add_log("SUCCESS", f"Bose设备连接成功: {device_info['name']}")
+        
+        elif packet_type == PacketType.BOSE_DISCONNECTED:
+            self._bose_tws_page.set_disconnected()
+            self.add_log("INFO", "Bose设备已断开")
+        
+        elif packet_type == PacketType.BOSE_BATTERY:
+            left = data.get("left", 0)
+            right = data.get("right", 0)
+            self._bose_tws_page.update_battery_info(left, right)
+        
+        elif packet_type == PacketType.BOSE_FIRMWARE:
+            version = data.get("version", "Unknown")
+            model = data.get("model", "")
+            self._bose_tws_page.update_firmware_info(version, model)
+        
+        elif packet_type == PacketType.BOSE_CLEAR_PAIRING:
+            success = data.get("success", False)
+            self._bose_tws_page.set_clear_pairing_result(success)
+        
+        elif packet_type == PacketType.BOSE_ERROR:
+            error_msg = data.get("message", "Unknown error")
+            self._bose_tws_page.add_log("ERROR", f"Bose设备错误: {error_msg}")
 
     # ========== 扫描相关 ==========
     def _on_scan_started(self, count):
@@ -577,6 +431,7 @@ class MainWindow(QMainWindow):
         self._devices = devices
         self._scan_page.update_devices(devices)
         self._repair_page.update_devices(devices)
+        self._bose_tws_page.update_devices(devices)
         self._scan_page.set_scanning(False)
 
     def _on_device_selected(self, mac):
@@ -584,6 +439,27 @@ class MainWindow(QMainWindow):
         device = next((d for d in self._devices if d['mac'] == mac), None)
         if device:
             self.add_log("INFO", f"选中设备：{device['name']} ({mac})")
+
+    # ========== Bose TWS 辅助工具相关 ==========
+    def _on_bose_connect(self, mac):
+        self.add_log("INFO", f"尝试连接 Bose 设备: {mac}")
+        self._send_command(f"CMD|BOSE_CONNECT|{mac}")
+
+    def _on_bose_disconnect(self):
+        self.add_log("INFO", "断开 Bose 设备连接")
+        self._send_command("CMD|BOSE_DISCONNECT")
+
+    def _on_bose_clear_pairing(self):
+        self.add_log("INFO", "清空 Bose 设备配对列表")
+        self._send_command("CMD|BOSE_CLEAR_PAIRING")
+
+    def _on_bose_read_battery(self):
+        self.add_log("INFO", "读取 Bose 设备电池信息")
+        self._send_command("CMD|BOSE_READ_BATT")
+
+    def _on_bose_read_firmware(self):
+        self.add_log("INFO", "读取 Bose 设备固件版本")
+        self._send_command("CMD|BOSE_READ_FW")
 
     # ========== 修复相关 ==========
     def _on_repair_action(self, action):

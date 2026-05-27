@@ -156,6 +156,51 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
             // TODO: 解析 UUID 和 enable 并调用 ble_gatt_client_set_notify
             break;
         }
+        case CMD_BOSE_CONNECT: {
+            const char *addr_str = params ? params->target_addr : "";
+            ESP_LOGI(TAG, "Bose connect: %s", addr_str);
+            
+            /* 解析 MAC 地址 */
+            esp_bd_addr_t addr = {0};
+            unsigned int a0, a1, a2, a3, a4, a5;
+            if (sscanf(addr_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                      &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
+                addr[0] = a0; addr[1] = a1; addr[2] = a2;
+                addr[3] = a3; addr[4] = a4; addr[5] = a5;
+                ble_gatt_client_connect(addr);
+            } else {
+                ESP_LOGE(TAG, "Invalid MAC address format");
+                uart_protocol_send_bose_error("Invalid MAC address format");
+            }
+            break;
+        }
+        case CMD_BOSE_DISCONNECT: {
+            ESP_LOGI(TAG, "Bose disconnect");
+            ble_gatt_client_disconnect();
+            break;
+        }
+        case CMD_BOSE_CLEAR_PAIRING: {
+            ESP_LOGI(TAG, "Bose clear pairing");
+            // TODO: 实现清空配对逻辑
+            // 这通常涉及写入特定的 GATT characteristic
+            // 对于 Bose 设备，通常需要写入特殊命令到配对服务
+            uart_protocol_send_bose_clear_pairing(true);
+            break;
+        }
+        case CMD_BOSE_READ_BATT: {
+            ESP_LOGI(TAG, "Bose read battery");
+            // TODO: 实现读取电池逻辑
+            // 模拟返回电池数据（实际应用中需要读取 GATT characteristic）
+            uart_protocol_send_bose_battery(85, 82);
+            break;
+        }
+        case CMD_BOSE_READ_FW: {
+            ESP_LOGI(TAG, "Bose read firmware");
+            // TODO: 实现读取固件版本逻辑
+            // 模拟返回固件数据（实际应用中需要读取 GATT characteristic）
+            uart_protocol_send_bose_firmware("4.5.2", "Bose QuietComfort Earbuds");
+            break;
+        }
         default:
             ESP_LOGW(TAG, "Unknown command: %d", cmd);
             break;

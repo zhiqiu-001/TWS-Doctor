@@ -123,6 +123,38 @@ static void parse_command(const char *data)
             ESP_LOGI(TAG, "GATTC_NOTIFY command processed");
         }
     }
+    /* CMD|BOSE_CONNECT|MAC地址 */
+    else if (strstr(data, "CMD|BOSE_CONNECT|") == data) {
+        const char *addr_str = data + 18;  /* 跳过 "CMD|BOSE_CONNECT|" */
+        strncpy(params.target_addr, addr_str, sizeof(params.target_addr) - 1);
+        ESP_LOGI(TAG, "Parsed BOSE_CONNECT command, target=%s", params.target_addr);
+        cmd_callback(CMD_BOSE_CONNECT, &params);
+        ESP_LOGI(TAG, "BOSE_CONNECT command processed");
+    }
+    /* CMD|BOSE_DISCONNECT */
+    else if (strcmp(data, "CMD|BOSE_DISCONNECT") == 0) {
+        ESP_LOGI(TAG, "Parsed BOSE_DISCONNECT command");
+        cmd_callback(CMD_BOSE_DISCONNECT, &params);
+        ESP_LOGI(TAG, "BOSE_DISCONNECT command processed");
+    }
+    /* CMD|BOSE_CLEAR_PAIRING */
+    else if (strcmp(data, "CMD|BOSE_CLEAR_PAIRING") == 0) {
+        ESP_LOGI(TAG, "Parsed BOSE_CLEAR_PAIRING command");
+        cmd_callback(CMD_BOSE_CLEAR_PAIRING, &params);
+        ESP_LOGI(TAG, "BOSE_CLEAR_PAIRING command processed");
+    }
+    /* CMD|BOSE_READ_BATT */
+    else if (strcmp(data, "CMD|BOSE_READ_BATT") == 0) {
+        ESP_LOGI(TAG, "Parsed BOSE_READ_BATT command");
+        cmd_callback(CMD_BOSE_READ_BATT, &params);
+        ESP_LOGI(TAG, "BOSE_READ_BATT command processed");
+    }
+    /* CMD|BOSE_READ_FW */
+    else if (strcmp(data, "CMD|BOSE_READ_FW") == 0) {
+        ESP_LOGI(TAG, "Parsed BOSE_READ_FW command");
+        cmd_callback(CMD_BOSE_READ_FW, &params);
+        ESP_LOGI(TAG, "BOSE_READ_FW command processed");
+    }
     else {
         ESP_LOGW(TAG, "Unknown command: %s", data);
     }
@@ -388,4 +420,94 @@ esp_err_t uart_protocol_send_scan_status(bool scanning, int count)
 void uart_protocol_set_callback(uart_cmd_callback_t callback)
 {
     cmd_callback = callback;
+}
+
+/**
+ * @brief 发送Bose设备连接成功通知到上位机
+ * @param name 设备名称
+ * @param model 设备型号
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_connected(const char *name, const char *model)
+{
+    char buffer[256];
+    /* 格式: BOSE|CONNECTED|设备名称|设备型号 */
+    snprintf(buffer, sizeof(buffer), "BOSE|CONNECTED|%s|%s\n", name, model ? model : "");
+    ESP_LOGI(TAG, "UART TX: %s", buffer);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+/**
+ * @brief 发送Bose设备断开连接通知到上位机
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_disconnected(void)
+{
+    const char *msg = "BOSE|DISCONNECTED\n";
+    ESP_LOGI(TAG, "UART TX: %s", msg);
+    uart_safe_write(msg, strlen(msg));
+    return ESP_OK;
+}
+
+/**
+ * @brief 发送Bose设备电池信息到上位机
+ * @param left_level 左耳电量百分比
+ * @param right_level 右耳电量百分比
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_battery(int left_level, int right_level)
+{
+    char buffer[64];
+    /* 格式: BOSE|BATT|左耳电量|右耳电量 */
+    snprintf(buffer, sizeof(buffer), "BOSE|BATT|%d|%d\n", left_level, right_level);
+    ESP_LOGI(TAG, "UART TX: %s", buffer);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+/**
+ * @brief 发送Bose设备固件信息到上位机
+ * @param version 固件版本号
+ * @param model 设备型号
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_firmware(const char *version, const char *model)
+{
+    char buffer[256];
+    /* 格式: BOSE|FW|固件版本|设备型号 */
+    snprintf(buffer, sizeof(buffer), "BOSE|FW|%s|%s\n", version, model ? model : "");
+    ESP_LOGI(TAG, "UART TX: %s", buffer);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+/**
+ * @brief 发送Bose设备清空配对结果到上位机
+ * @param success 是否成功
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_clear_pairing(bool success)
+{
+    char buffer[32];
+    /* 格式: BOSE|CLEAR_PAIRING|OK/FAIL */
+    snprintf(buffer, sizeof(buffer), "BOSE|CLEAR_PAIRING|%s\n", success ? "OK" : "FAIL");
+    ESP_LOGI(TAG, "UART TX: %s", buffer);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+/**
+ * @brief 发送Bose设备错误信息到上位机
+ * @param message 错误信息
+ * @return ESP_OK: 成功, 其他: 失败
+ */
+esp_err_t uart_protocol_send_bose_error(const char *message)
+{
+    char buffer[256];
+    /* 格式: BOSE|ERROR|错误信息 */
+    snprintf(buffer, sizeof(buffer), "BOSE|ERROR|%s\n", message);
+    ESP_LOGI(TAG, "UART TX: %s", buffer);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
 }
