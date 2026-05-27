@@ -39,6 +39,7 @@ static uint16_t g_conn_id = 0;
 static ble_gattc_state_t g_state = BLE_GATTC_STATE_IDLE;
 static esp_bd_addr_t g_target_addr = {0};
 static bool g_is_connected = false;
+static bool g_gattc_registered = false;
 
 /* Service 信息存储 */
 static ble_gatt_service_info_t g_services[MAX_SERVICES];
@@ -265,6 +266,7 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
                      param->reg.status, param->reg.app_id);
             if (param->reg.status == ESP_GATT_OK) {
                 g_gattc_if = gattc_if;
+                g_gattc_registered = true;
             }
             break;
         }
@@ -376,21 +378,23 @@ esp_err_t ble_gatt_client_init(void)
 {
     ESP_LOGI(TAG, "Initializing BLE GATT Client...");
     
-    /* 注册 GATT 客户端应用 */
-    esp_err_t ret = esp_ble_gattc_app_register(ESP_GATT_APP_ID);
+    /* 先注册回调 */
+    esp_err_t ret = esp_ble_gattc_register_callback(gattc_event_handler);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ble_gattc_app_register failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "esp_ble_gattc_register_callback failed: %s",
+                 esp_err_to_name(ret));
         return ret;
     }
-    
-    /* 注册 GATT 客户端回调 */
-    ret = esp_ble_gattc_register_callback(gattc_event_handler);
+
+    /* 再注册 APP */
+    ret = esp_ble_gattc_app_register(ESP_GATT_APP_ID);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ble_gattc_register_callback failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "esp_ble_gattc_app_register failed: %s",
+                 esp_err_to_name(ret));
         return ret;
     }
-    
-    ESP_LOGI(TAG, "BLE GATT Client initialized");
+
+    ESP_LOGI(TAG, "BLE GATT Client init success");
     return ESP_OK;
 }
 
@@ -400,8 +404,8 @@ esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr)
     ESP_LOGI(TAG, "  Address: %02X:%02X:%02X:%02X:%02X:%02X",
              addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     
-    if (g_gattc_if == 0) {
-        ESP_LOGE(TAG, "GATT client not initialized");
+    if (!g_gattc_registered) {
+        ESP_LOGE(TAG, "GATT client not registered");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -411,7 +415,7 @@ esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr)
     /* 打开 GATT 连接 - 使用增强型 API */
     esp_ble_gatt_creat_conn_params_t conn_params = {
         .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-        .remote_addr_type = BLE_ADDR_TYPE_PUBLIC,
+        .remote_addr_type = BLE_ADDR_TYPE_RANDOM,
         .is_direct = true,
         .is_aux = false,
         .phy_mask = 0,
