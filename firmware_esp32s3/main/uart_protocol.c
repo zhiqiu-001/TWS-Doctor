@@ -125,7 +125,7 @@ static void parse_command(const char *data)
     }
     /* CMD|BOSE_CONNECT|MAC地址 */
     else if (strstr(data, "CMD|BOSE_CONNECT|") == data) {
-        const char *addr_str = data + 18;  /* 跳过 "CMD|BOSE_CONNECT|" */
+        const char *addr_str = data + 17;  /* 跳过 "CMD|BOSE_CONNECT|" */
         strncpy(params.target_addr, addr_str, sizeof(params.target_addr) - 1);
         ESP_LOGI(TAG, "Parsed BOSE_CONNECT command, target=%s", params.target_addr);
         cmd_callback(CMD_BOSE_CONNECT, &params);
