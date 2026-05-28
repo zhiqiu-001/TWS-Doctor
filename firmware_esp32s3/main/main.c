@@ -28,13 +28,46 @@ static const char *TAG = "APP_MAIN";
  */
 static void on_ble_scan_result(ble_device_t *device)
 {
-    /* 使用处理后的设备名称 */
-    const char *name = device->name[0] ? device->name : "(unknown)";
-    ESP_LOGI(TAG, "BLE device found: %s, %s, %d dBm", 
-             name, device->addr, device->rssi);
-    
+    /**
+     * 使用处理后的设备名称
+     */
+    const char *name =
+        device->name[0] ?
+        device->name :
+        "(unknown)";
+
+    /**
+     * 打印设备信息
+     */
+    ESP_LOGI(TAG,
+             "BLE device found: %s, %s, type=%d, rssi=%d dBm",
+             name,
+             device->addr,
+             device->addr_type,
+             device->rssi);
+
+    /**
+     * 打印原始 BDA
+     */
+    ESP_LOGI(TAG,
+             "Raw BDA: %02X:%02X:%02X:%02X:%02X:%02X",
+             device->bda[0],
+             device->bda[1],
+             device->bda[2],
+             device->bda[3],
+             device->bda[4],
+             device->bda[5]);
+
+    /**
+     * 地址类型解释
+     */
+    ESP_LOGI(TAG,
+             "Address type: %s",
+             device->addr_type == BLE_ADDR_TYPE_PUBLIC ?
+             "PUBLIC" :
+             "RANDOM");
+
     /* 注：扫描结果已在 ble_scan.c 中发送，此处不再重复发送 */
-    /* 如果需要自定义处理，可以在这里添加 */
 }
 
 /**
@@ -120,7 +153,9 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
         }
         case CMD_GATTC_CONNECT: {
             const char *addr_str = params ? params->target_addr : "";
-            ESP_LOGI(TAG, "GATTC connect: %s", addr_str);
+            esp_ble_addr_type_t addr_type = params ? params->addr_type : BLE_ADDR_TYPE_PUBLIC;
+
+            ESP_LOGI(TAG, "GATTC connect: %s, type=%d", addr_str, addr_type);
             
             /* 解析 MAC 地址 */
             esp_bd_addr_t addr = {0};
@@ -129,7 +164,9 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
                       &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
                 addr[0] = a0; addr[1] = a1; addr[2] = a2;
                 addr[3] = a3; addr[4] = a4; addr[5] = a5;
-                ble_gatt_client_connect(addr);
+                ble_scan_stop();
+                ble_scan_wait_for_stop(pdMS_TO_TICKS(1000));
+                ble_gatt_client_connect(addr, addr_type);
             } else {
                 ESP_LOGE(TAG, "Invalid MAC address format");
             }
@@ -158,8 +195,9 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
         }
         case CMD_BOSE_CONNECT: {
             const char *addr_str = params ? params->target_addr : "";
-            ESP_LOGI(TAG, "Bose connect: %s", addr_str);
-            
+            esp_ble_addr_type_t addr_type = params ? params->addr_type : BLE_ADDR_TYPE_PUBLIC;
+            ESP_LOGI(TAG, "Bose connect: %s, type=%d", addr_str, addr_type);
+
             /* 解析 MAC 地址 */
             esp_bd_addr_t addr = {0};
             unsigned int a0, a1, a2, a3, a4, a5;
@@ -167,7 +205,9 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
                       &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
                 addr[0] = a0; addr[1] = a1; addr[2] = a2;
                 addr[3] = a3; addr[4] = a4; addr[5] = a5;
-                ble_gatt_client_connect(addr);
+                ble_scan_stop();
+                ble_scan_wait_for_stop(pdMS_TO_TICKS(1000));
+                ble_gatt_client_connect(addr, addr_type);
             } else {
                 ESP_LOGE(TAG, "Invalid MAC address format");
                 uart_protocol_send_bose_error("Invalid MAC address format");

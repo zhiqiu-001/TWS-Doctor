@@ -14,6 +14,8 @@
 #include "esp_bt_device.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatt_common_api.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "uart_protocol.h"
 
@@ -26,6 +28,9 @@ static bool scanning = false;
 static int scan_count_limit = 0;
 
 static int scan_count = 0;
+
+static SemaphoreHandle_t scan_stop_sem = NULL;
+static bool scan_stop_pending = false;
 
 /**
  * @brief BLE GAP事件处理函数
@@ -51,7 +56,20 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
         device.rssi = report->rssi;
 
         /**
-         * MAC地址
+         * 保存原始 MAC 地址
+         */
+        memcpy(device.bda,
+            report->addr,
+            ESP_BD_ADDR_LEN);
+
+        /**
+         * 保存 BLE 地址类型
+         */
+        device.addr_type =
+            report->addr_type;
+
+        /**
+         * MAC字符串
          */
         snprintf(device.addr,
                  sizeof(device.addr),
@@ -62,6 +80,15 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
                  report->addr[3],
                  report->addr[4],
                  report->addr[5]);
+
+        /**
+         * 打印地址类型（非常重要）
+         */
+        ESP_LOGI(TAG,
+                "Address type: %d (%s)",
+                device.addr_type,
+                device.addr_type == BLE_ADDR_TYPE_PUBLIC ?
+                    "PUBLIC" : "RANDOM");
 
         /**
          * 获取设备名称
@@ -117,11 +144,18 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
          * 发给上位机（只发送有名称的设备）
          */
         if (device.name[0]) {
-            ESP_LOGI(TAG, "Sending scan result to PC: SCAN|BLE|%s|%s|%d", 
-                     device.name, device.addr, device.rssi);
+            ESP_LOGI(TAG,
+                    "Sending scan result to PC: "
+                    "SCAN|BLE|%s|%s|%d|%d",
+                    device.name,
+                    device.addr,
+                    device.addr_type,
+                    device.rssi);
+
             uart_protocol_send_ble_scan_result(
                 device.name,
                 device.addr,
+                device.addr_type,
                 device.rssi
             );
         } else {
@@ -166,6 +200,12 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
         ESP_LOGI(TAG,
                  "BLE scan stop complete");
 
+        scan_stop_pending = false;
+
+        if (scan_stop_sem != NULL) {
+            xSemaphoreGive(scan_stop_sem);
+        }
+
         uart_protocol_send_scan_status(
             false,
             scan_count
@@ -186,6 +226,16 @@ esp_err_t ble_scan_init(void)
 {
     ESP_LOGI(TAG,
              "Initializing BLE scan");
+
+    scan_stop_sem = xSemaphoreCreateBinary();
+
+    if (scan_stop_sem == NULL) {
+
+        ESP_LOGE(TAG,
+                 "Failed to create scan stop semaphore");
+
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_err_t ret;
 
@@ -407,7 +457,33 @@ esp_err_t ble_scan_stop(void)
 
     scanning = false;
 
+    scan_stop_pending = true;
+
+    if (scan_stop_sem != NULL) {
+        xSemaphoreTake(scan_stop_sem, 0);
+    }
+
     return esp_ble_gap_stop_ext_scan();
+}
+
+esp_err_t ble_scan_wait_for_stop(TickType_t timeout)
+{
+    if (!scan_stop_pending) {
+        return ESP_OK;
+    }
+
+    if (scan_stop_sem == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(scan_stop_sem, timeout) == pdTRUE) {
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG,
+             "Wait for scan stop timed out");
+
+    return ESP_ERR_TIMEOUT;
 }
 
 /**

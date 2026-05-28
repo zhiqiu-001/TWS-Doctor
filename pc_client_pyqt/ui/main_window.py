@@ -354,6 +354,7 @@ class MainWindow(QMainWindow):
             device = {
                 "name": data.get("name", "Unknown"),
                 "mac": data.get("addr", "").upper(),
+                "addr_type": data.get("addr_type", 0),
                 "rssi": data.get("rssi", 0),
                 "type": "BLE"
             }
@@ -441,9 +442,9 @@ class MainWindow(QMainWindow):
             self.add_log("INFO", f"选中设备：{device['name']} ({mac})")
 
     # ========== Bose TWS 辅助工具相关 ==========
-    def _on_bose_connect(self, mac):
+    def _on_bose_connect(self, mac, addr_type):
         self.add_log("INFO", f"尝试连接 Bose 设备: {mac}")
-        self._send_command(f"CMD|BOSE_CONNECT|{mac}")
+        self._send_command(f"CMD|BOSE_CONNECT|{mac}|{addr_type}")   
 
     def _on_bose_disconnect(self):
         self.add_log("INFO", "断开 Bose 设备连接")

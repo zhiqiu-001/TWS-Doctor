@@ -80,27 +80,77 @@ class ScanPage(QWidget):
         # 设备列表区域
         list_group = QGroupBox("设备列表")
         list_layout = QVBoxLayout(list_group)
-        
-        self._device_table = QTableWidget(0, 5)
-        self._device_table.setHorizontalHeaderLabels(["序号", "设备名称", "MAC 地址", "信号强度", "设备类型"])
-        self._device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
+        self._device_table = QTableWidget(0, 6)
+
+        self._device_table.setHorizontalHeaderLabels([
+            "序号",
+            "设备名称",
+            "MAC 地址",
+            "地址类型",
+            "信号强度",
+            "设备类型"
+        ])
+
+        # 序号
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(0, 45)
-        # 设备名称列设置固定宽度，不再自动拉伸
-        self._device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+
+        # 设备名称
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(1, 200)
-        self._device_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+
+        # MAC
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            2,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(2, 150)
-        self._device_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._device_table.setColumnWidth(3, 135)
-        # 设备类型列增加宽度，与信号强度保持距离
-        self._device_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self._device_table.setColumnWidth(4, 85)
+
+        # 地址类型
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            3,
+            QHeaderView.ResizeMode.Fixed
+        )
+        self._device_table.setColumnWidth(3, 90)
+
+        # 信号强度
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            4,
+            QHeaderView.ResizeMode.Fixed
+        )
+        self._device_table.setColumnWidth(4, 135)
+
+        # 设备类型
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            5,
+            QHeaderView.ResizeMode.Fixed
+        )
+        self._device_table.setColumnWidth(5, 85)
+
         self._device_table.verticalHeader().setVisible(False)
         self._device_table.verticalHeader().setDefaultSectionSize(28)
-        self._device_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._device_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        self._device_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+
+        self._device_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+
         self._device_table.setShowGrid(False)
-        self._device_table.doubleClicked.connect(self._on_device_double_clicked)
+
+        self._device_table.doubleClicked.connect(
+            self._on_device_double_clicked
+        )
+
         self._add_empty_state_to_table()
         
         list_layout.addWidget(self._device_table)
@@ -246,6 +296,21 @@ class ScanPage(QWidget):
             mac_item = QTableWidgetItem(device["mac"])
             mac_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             self._device_table.setItem(row, 2, mac_item)
+
+            # 地址类型
+            addr_type_text = (
+                "PUBLIC"
+                if device.get("addr_type", 0) == 0
+                else "RANDOM"
+            )
+
+            addr_type_item = QTableWidgetItem(addr_type_text)
+            addr_type_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled |
+                Qt.ItemFlag.ItemIsSelectable
+            )
+
+            self._device_table.setItem(row, 3, addr_type_item)
             
             # 信号强度
             rssi_widget = QWidget()
@@ -267,13 +332,13 @@ class ScanPage(QWidget):
             rssi_layout.addWidget(rssi_value)
             rssi_layout.addStretch()
             
-            self._device_table.setCellWidget(row, 3, rssi_widget)
+            self._device_table.setCellWidget(row, 4, rssi_widget)
             
             # 设备类型
             type_item = QTableWidgetItem(device["type"])
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             type_item.setForeground(QBrush(QColor("#0d6efd")))
-            self._device_table.setItem(row, 4, type_item)
+            self._device_table.setItem(row, 5, type_item)
         
         self._scan_result_label.setText(f"扫描结果：{len(devices)} 个设备")
         self._last_update_time = datetime.now().strftime("%H:%M:%S")

@@ -49,6 +49,7 @@
 
 #include <stdbool.h>
 #include "esp_err.h"
+#include "esp_gap_ble_api.h"   // 推荐加
 
 /**
  * @brief 串口命令类型枚举
@@ -77,6 +78,7 @@ typedef enum {
 typedef struct {
     int scan_count;        /*!< 扫描数量限制，0表示不限制 */
     char target_addr[18];  /*!< 目标设备MAC地址 */
+    uint8_t addr_type;   // ★新增这一行
 } uart_cmd_params_t;
 
 /**
@@ -96,10 +98,11 @@ esp_err_t uart_protocol_init(void);
  * @brief 发送BLE扫描结果到上位机
  * @param name 设备名称
  * @param addr 设备MAC地址
+ * @param addr_type BLE地址类型
  * @param rssi 信号强度
  * @return ESP_OK: 成功, 其他: 失败
  */
-esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, int rssi);
+esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, uint8_t addr_type, int rssi);
 
 /**
  * @brief 发送经典蓝牙扫描结果到上位机

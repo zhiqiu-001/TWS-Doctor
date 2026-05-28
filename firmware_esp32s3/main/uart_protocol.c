@@ -123,13 +123,35 @@ static void parse_command(const char *data)
             ESP_LOGI(TAG, "GATTC_NOTIFY command processed");
         }
     }
-    /* CMD|BOSE_CONNECT|MAC地址 */
+    /* CMD|BOSE_CONNECT|MAC地址|ADDR_TYPE */
     else if (strstr(data, "CMD|BOSE_CONNECT|") == data) {
-        const char *addr_str = data + 17;  /* 跳过 "CMD|BOSE_CONNECT|" */
-        strncpy(params.target_addr, addr_str, sizeof(params.target_addr) - 1);
-        ESP_LOGI(TAG, "Parsed BOSE_CONNECT command, target=%s", params.target_addr);
+
+        char temp[128] = {0};
+        strncpy(temp, data, sizeof(temp) - 1);
+
+        char *token = strtok(temp, "|"); // CMD
+        token = strtok(NULL, "|");       // BOSE_CONNECT
+        token = strtok(NULL, "|");       // MAC
+
+        if (token) {
+            strncpy(params.target_addr, token,
+                    sizeof(params.target_addr) - 1);
+        }
+
+        token = strtok(NULL, "|");       // addr_type
+
+        if (token) {
+            params.addr_type = (esp_ble_addr_type_t)atoi(token);
+        } else {
+            params.addr_type = BLE_ADDR_TYPE_PUBLIC;
+        }
+
+        ESP_LOGI(TAG,
+                "BOSE_CONNECT: %s, addr_type=%d",
+                params.target_addr,
+                params.addr_type);
+
         cmd_callback(CMD_BOSE_CONNECT, &params);
-        ESP_LOGI(TAG, "BOSE_CONNECT command processed");
     }
     /* CMD|BOSE_DISCONNECT */
     else if (strcmp(data, "CMD|BOSE_DISCONNECT") == 0) {
@@ -316,16 +338,31 @@ esp_err_t uart_protocol_init(void)
  * @brief 发送BLE扫描结果到上位机
  * @param name 设备名称
  * @param addr 设备MAC地址
+ * @param addr_type BLE地址类型
  * @param rssi 信号强度
  * @return ESP_OK: 成功, 其他: 失败
  */
-esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, int rssi)
+esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, uint8_t addr_type, int rssi)
 {
     char buffer[256];
-    /* 格式: SCAN|BLE|设备名称|MAC地址|RSSI */
-    snprintf(buffer, sizeof(buffer), "SCAN|BLE|%s|%s|%d\n", name, addr, rssi);
+
+    /**
+     * 格式:
+     *
+     * SCAN|BLE|设备名称|MAC地址|ADDR_TYPE|RSSI
+     */
+    snprintf(buffer,
+             sizeof(buffer),
+             "SCAN|BLE|%s|%s|%d|%d\n",
+             name,
+             addr,
+             addr_type,
+             rssi);
+
     ESP_LOGI(TAG, "UART TX: %s", buffer);
+
     uart_safe_write(buffer, strlen(buffer));
+
     return ESP_OK;
 }
 

@@ -398,12 +398,13 @@ esp_err_t ble_gatt_client_init(void)
     return ESP_OK;
 }
 
-esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr)
+esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type)
 {
     ESP_LOGI(TAG, "Connecting to device...");
     ESP_LOGI(TAG, "  Address: %02X:%02X:%02X:%02X:%02X:%02X",
              addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
-    
+    ESP_LOGI(TAG, "  Address Type: %d", addr_type);
+
     if (!g_gattc_registered) {
         ESP_LOGE(TAG, "GATT client not registered");
         return ESP_ERR_INVALID_STATE;
@@ -415,7 +416,7 @@ esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr)
     /* 打开 GATT 连接 - 使用增强型 API */
     esp_ble_gatt_creat_conn_params_t conn_params = {
         .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-        .remote_addr_type = BLE_ADDR_TYPE_RANDOM,
+        .remote_addr_type = addr_type,
         .is_direct = true,
         .is_aux = false,
         .phy_mask = 0,

@@ -19,11 +19,22 @@ static const char *TAG = "STATE_MACHINE";
  */
 static void on_ble_device_found(ble_device_t *device)
 {
-    ESP_LOGI(TAG, "Found BLE device: %s [%s] RSSI: %d", 
-             device->name, device->addr, device->rssi);
-    
-    /* 将扫描结果发送到上位机 */
-    uart_protocol_send_ble_scan_result(device->name, device->addr, device->rssi);
+    ESP_LOGI(TAG,
+             "Found BLE device: %s [%s] type=%d RSSI=%d",
+             device->name,
+             device->addr,
+             device->addr_type,
+             device->rssi);
+
+    /**
+     * 将扫描结果发送到上位机
+     */
+    uart_protocol_send_ble_scan_result(
+        device->name,
+        device->addr,
+        device->addr_type,
+        device->rssi
+    );
 }
 
 /**

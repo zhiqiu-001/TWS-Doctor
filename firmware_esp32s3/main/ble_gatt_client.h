@@ -75,9 +75,10 @@ esp_err_t ble_gatt_client_init(void);
 /**
  * @brief 连接到指定 Bose 耳机
  * @param addr 目标设备 MAC 地址
+ * @param addr_type 目标设备地址类型（public/random）
  * @return ESP_OK: 发起连接请求成功, 其他: 失败
  */
-esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr);
+esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type);
 
 /**
  * @brief 断开连接

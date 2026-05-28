@@ -11,14 +11,44 @@
 
 #include <stdbool.h>
 #include "esp_err.h"
+#include "esp_gap_ble_api.h"
+#include "freertos/FreeRTOS.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * @brief BLE设备信息结构体
  */
 typedef struct {
-    char name[64];      /*!< 设备名称 */
-    char addr[18];      /*!< 设备MAC地址，格式如 "AA:BB:CC:DD:EE:FF" */
-    int rssi;           /*!< 信号强度（dBm） */
+
+    char name[64];
+
+    /**
+     * MAC字符串
+     * "AA:BB:CC:DD:EE:FF"
+     */
+    char addr[18];
+
+    /**
+     * 原始 MAC 地址
+     */
+    esp_bd_addr_t bda;
+
+    /**
+     * BLE 地址类型
+     *
+     * 0 = public
+     * 1 = random
+     */
+    esp_ble_addr_type_t addr_type;
+
+    /**
+     * RSSI
+     */
+    int rssi;
+
 } ble_device_t;
 
 /**
@@ -45,6 +75,18 @@ esp_err_t ble_scan_start(int count_limit);
  * @return ESP_OK: 成功, 其他: 失败
  */
 esp_err_t ble_scan_stop(void);
+
+/**
+ * @brief 等待扫描完全停止
+ * 
+ * 阻塞等待直到收到 ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT 事件，
+ * 确保蓝牙控制器已完全停止扫描。
+ * 如果扫描未在运行，则立即返回。
+ * 
+ * @param timeout 等待超时时间（FreeRTOS tick）
+ * @return ESP_OK: 扫描已停止, ESP_ERR_TIMEOUT: 等待超时
+ */
+esp_err_t ble_scan_wait_for_stop(TickType_t timeout);
 
 /**
  * @brief 设置扫描结果回调函数

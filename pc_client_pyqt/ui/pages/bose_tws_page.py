@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 class BoseTWSPage(QWidget):
     """Bose TWS 辅助工具页面"""
     
-    connect_device = pyqtSignal(str)
+    connect_device = pyqtSignal(str, int)
     disconnect_device = pyqtSignal()
     clear_pairing = pyqtSignal()
     read_battery = pyqtSignal()
@@ -42,23 +42,68 @@ class BoseTWSPage(QWidget):
         # 左边：设备列表区域
         device_group = QGroupBox("已扫描设备")
         device_layout = QVBoxLayout(device_group)
-        
-        self._device_table = QTableWidget(0, 4)
-        self._device_table.setHorizontalHeaderLabels(["设备名称", "MAC 地址", "信号强度", "操作"])
-        self._device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
+        self._device_table = QTableWidget(0, 5)
+
+        self._device_table.setHorizontalHeaderLabels([
+            "设备名称",
+            "MAC 地址",
+            "地址类型",
+            "信号强度",
+            "操作"
+        ])
+
+        # 设备名称
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(0, 180)
-        self._device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+
+        # MAC
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(1, 140)
-        self._device_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+
+        # 地址类型
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            2,
+            QHeaderView.ResizeMode.Fixed
+        )
         self._device_table.setColumnWidth(2, 90)
-        self._device_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self._device_table.setColumnWidth(3, 70)
+
+        # 信号强度
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            3,
+            QHeaderView.ResizeMode.Fixed
+        )
+        self._device_table.setColumnWidth(3, 90)
+
+        # 操作
+        self._device_table.horizontalHeader().setSectionResizeMode(
+            4,
+            QHeaderView.ResizeMode.Fixed
+        )
+        self._device_table.setColumnWidth(4, 70)
+
         self._device_table.verticalHeader().setVisible(False)
         self._device_table.verticalHeader().setDefaultSectionSize(28)
-        self._device_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._device_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        self._device_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+
+        self._device_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+
         self._device_table.setShowGrid(False)
-        self._device_table.itemSelectionChanged.connect(self._on_device_selected)
+
+        self._device_table.itemSelectionChanged.connect(
+            self._on_device_selected
+        )
         
         device_layout.addWidget(self._device_table)
         top_layout.addWidget(device_group, 3)  # 左侧占3份
@@ -208,11 +253,12 @@ class BoseTWSPage(QWidget):
         if selected_items:
             row = selected_items[0].row()
             mac = self._device_table.item(row, 1).text()
+            addr_type = int(self._device_table.item(row, 2).text())
             self._connect_btn.setEnabled(False)
             self._connection_status.setText("连接中...")
             self._connection_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
             self.add_log("INFO", f"正在连接设备: {mac}")
-            self.connect_device.emit(mac)
+            self.connect_device.emit(mac, addr_type)
     
     def _on_disconnect_clicked(self):
         self._disconnect_btn.setEnabled(False)
@@ -281,6 +327,27 @@ class BoseTWSPage(QWidget):
             mac_item = QTableWidgetItem(device["mac"])
             mac_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             self._device_table.setItem(row, 1, mac_item)
+
+            # 地址类型
+            addr_type_text = (
+                "PUBLIC"
+                if device.get("addr_type", 0) == 0
+                else "RANDOM"
+            )
+
+            addr_type_item = QTableWidgetItem(addr_type_text)
+            addr_type_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled |
+                Qt.ItemFlag.ItemIsSelectable
+            )
+
+            # RANDOM 用黄色更醒目
+            if device.get("addr_type", 0) == 0:
+                addr_type_item.setForeground(QBrush(QColor("#00d4ff")))
+            else:
+                addr_type_item.setForeground(QBrush(QColor("#ffaa00")))
+
+            self._device_table.setItem(row, 2, addr_type_item)
             
             rssi_item = QTableWidgetItem(f"{device['rssi']} dBm")
             rssi_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -290,7 +357,7 @@ class BoseTWSPage(QWidget):
                 rssi_item.setForeground(QBrush(QColor("#00d4ff")))
             else:
                 rssi_item.setForeground(QBrush(QColor("#ff4444")))
-            self._device_table.setItem(row, 2, rssi_item)
+            self._device_table.setItem(row, 3, rssi_item)
             
             # 添加连接按钮
             connect_btn = QPushButton("连接")
@@ -300,7 +367,7 @@ class BoseTWSPage(QWidget):
                     background-color: #2563EB;
                     border: none;
                     border-radius: 4px;
-                    padding: 2px 8px;
+                    padding: 2px 8px;   
                     color: white;
                     font-size: 11px;
                 }
@@ -312,17 +379,17 @@ class BoseTWSPage(QWidget):
                     color: #94A3B8;
                 }
             """)
-            connect_btn.clicked.connect(lambda checked, mac=device["mac"]: self._on_row_connect(mac))
+            connect_btn.clicked.connect(lambda checked, mac=device["mac"], addr_type=device["addr_type"]: self._on_row_connect(mac, addr_type))
             connect_btn.setEnabled(not self._connected_device)
-            self._device_table.setCellWidget(row, 3, connect_btn)
+            self._device_table.setCellWidget(row, 4, connect_btn)
     
-    def _on_row_connect(self, mac):
+    def _on_row_connect(self, mac, addr_type):
         """行内连接按钮点击处理"""
         self._connect_btn.setEnabled(False)
         self._connection_status.setText("连接中...")
         self._connection_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
         self.add_log("INFO", f"正在连接设备: {mac}")
-        self.connect_device.emit(mac)
+        self.connect_device.emit(mac, addr_type)
     
     def set_connected(self, device_info):
         """设置连接状态"""
