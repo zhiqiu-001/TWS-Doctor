@@ -11,6 +11,7 @@
 #include "driver/uart.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#include <stdio.h>
 
 /* 日志标签 */
 static const char *TAG = "UART_PROTOCOL";
@@ -176,6 +177,51 @@ static void parse_command(const char *data)
         ESP_LOGI(TAG, "Parsed BOSE_READ_FW command");
         cmd_callback(CMD_BOSE_READ_FW, &params);
         ESP_LOGI(TAG, "BOSE_READ_FW command processed");
+    }
+    /* === AT+ 命令（test 代码兼容） === */
+    /* CMD|PING */
+    else if (strcmp(data, "CMD|PING") == 0) {
+        ESP_LOGI(TAG, "Parsed PING command");
+        cmd_callback(CMD_PING, &params);
+        ESP_LOGI(TAG, "PING command processed");
+    }
+    /* AT+SCAN */
+    else if (strcmp(data, "AT+SCAN") == 0) {
+        ESP_LOGI(TAG, "Parsed AT+SCAN command");
+        cmd_callback(CMD_AT_SCAN, &params);
+    }
+    /* AT+SCANSTOP */
+    else if (strcmp(data, "AT+SCANSTOP") == 0) {
+        ESP_LOGI(TAG, "Parsed AT+SCANSTOP command");
+        cmd_callback(CMD_AT_SCANSTOP, &params);
+    }
+    /* AT+CONNECT=type,addr  (e.g. AT+CONNECT=0,7c:df:a1:40:01:dd) */
+    else if (strstr(data, "AT+CONNECT=") == data) {
+        const char *args = data + 11;
+        char temp[128] = {0};
+        strncpy(temp, args, sizeof(temp) - 1);
+        char *comma = strchr(temp, ',');
+        if (comma) {
+            *comma = '\0';
+            params.addr_type = (uint8_t)atoi(temp);
+            strncpy(params.target_addr, comma + 1, sizeof(params.target_addr) - 1);
+        } else {
+            params.addr_type = 0;
+            strncpy(params.target_addr, temp, sizeof(params.target_addr) - 1);
+        }
+        ESP_LOGI(TAG, "Parsed AT+CONNECT: addr_type=%d, addr=%s",
+                 params.addr_type, params.target_addr);
+        cmd_callback(CMD_AT_CONNECT, &params);
+    }
+    /* AT+DISCONNECT */
+    else if (strcmp(data, "AT+DISCONNECT") == 0) {
+        ESP_LOGI(TAG, "Parsed AT+DISCONNECT command");
+        cmd_callback(CMD_AT_DISCONNECT, &params);
+    }
+    /* AT+HELP */
+    else if (strcmp(data, "AT+HELP") == 0) {
+        ESP_LOGI(TAG, "Parsed AT+HELP command");
+        cmd_callback(CMD_AT_HELP, &params);
     }
     else {
         ESP_LOGW(TAG, "Unknown command: %s", data);
@@ -359,8 +405,6 @@ esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr,
              addr_type,
              rssi);
 
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
-
     uart_safe_write(buffer, strlen(buffer));
 
     return ESP_OK;
@@ -470,7 +514,6 @@ esp_err_t uart_protocol_send_bose_connected(const char *name, const char *model)
     char buffer[256];
     /* 格式: BOSE|CONNECTED|设备名称|设备型号 */
     snprintf(buffer, sizeof(buffer), "BOSE|CONNECTED|%s|%s\n", name, model ? model : "");
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
     uart_safe_write(buffer, strlen(buffer));
     return ESP_OK;
 }
@@ -482,7 +525,6 @@ esp_err_t uart_protocol_send_bose_connected(const char *name, const char *model)
 esp_err_t uart_protocol_send_bose_disconnected(void)
 {
     const char *msg = "BOSE|DISCONNECTED\n";
-    ESP_LOGI(TAG, "UART TX: %s", msg);
     uart_safe_write(msg, strlen(msg));
     return ESP_OK;
 }
@@ -498,7 +540,6 @@ esp_err_t uart_protocol_send_bose_battery(int left_level, int right_level)
     char buffer[64];
     /* 格式: BOSE|BATT|左耳电量|右耳电量 */
     snprintf(buffer, sizeof(buffer), "BOSE|BATT|%d|%d\n", left_level, right_level);
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
     uart_safe_write(buffer, strlen(buffer));
     return ESP_OK;
 }
@@ -514,7 +555,6 @@ esp_err_t uart_protocol_send_bose_firmware(const char *version, const char *mode
     char buffer[256];
     /* 格式: BOSE|FW|固件版本|设备型号 */
     snprintf(buffer, sizeof(buffer), "BOSE|FW|%s|%s\n", version, model ? model : "");
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
     uart_safe_write(buffer, strlen(buffer));
     return ESP_OK;
 }
@@ -529,7 +569,6 @@ esp_err_t uart_protocol_send_bose_clear_pairing(bool success)
     char buffer[32];
     /* 格式: BOSE|CLEAR_PAIRING|OK/FAIL */
     snprintf(buffer, sizeof(buffer), "BOSE|CLEAR_PAIRING|%s\n", success ? "OK" : "FAIL");
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
     uart_safe_write(buffer, strlen(buffer));
     return ESP_OK;
 }
@@ -544,7 +583,121 @@ esp_err_t uart_protocol_send_bose_error(const char *message)
     char buffer[256];
     /* 格式: BOSE|ERROR|错误信息 */
     snprintf(buffer, sizeof(buffer), "BOSE|ERROR|%s\n", message);
-    ESP_LOGI(TAG, "UART TX: %s", buffer);
     uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+/* ======================== test 兼容 [xxx] 格式输出 ======================== */
+
+esp_err_t uart_protocol_send_device_found(uint8_t addr_type, const char *addr, int rssi, const char *name)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+             "[DEVICE] addr_type=%d addr=%s rssi=%d name=%s\n",
+             addr_type, addr, rssi, name ? name : "");
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_scan_msg(bool started)
+{
+    const char *msg = started ? "[SCAN] Scanning started\n" : "[SCAN] Scanning stopped\n";
+    uart_safe_write(msg, strlen(msg));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_connected_msg(int conn_id, const char *addr)
+{
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer),
+             "[CONNECTED] conn_id=%d addr=%s\n",
+             conn_id, addr ? addr : "");
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_open_msg(int status)
+{
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer),
+             "[OPEN] ESP_GATTC_OPEN_EVT status=%d\n", status);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_disconnected_msg(int reason)
+{
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer),
+             "[DISCONNECTED] reason=0x%x\n", reason);
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_notify_msg(uint16_t handle, const uint8_t *value, uint16_t value_len)
+{
+    char buffer[512];
+    int pos = snprintf(buffer, sizeof(buffer),
+                       "[NOTIFY] handle=0x%04X value=", handle);
+    for (uint16_t i = 0; i < value_len && pos < (int)sizeof(buffer) - 6; i++) {
+        pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%02X ", value[i]);
+    }
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n");
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_auth_ok(const char *info)
+{
+    char buffer[256];
+    if (info && info[0]) {
+        snprintf(buffer, sizeof(buffer), "[AUTH_OK] %s\n", info);
+    } else {
+        snprintf(buffer, sizeof(buffer), "[AUTH_OK]\n");
+    }
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_auth_fail(const char *reason)
+{
+    char buffer[256];
+    if (reason && reason[0]) {
+        snprintf(buffer, sizeof(buffer), "[AUTH_FAIL] %s\n", reason);
+    } else {
+        snprintf(buffer, sizeof(buffer), "[AUTH_FAIL]\n");
+    }
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_error_msg(const char *message)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "[ERROR] %s\n", message ? message : "");
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_init_msg(const char *message)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "[INIT] %s\n", message ? message : "");
+    uart_safe_write(buffer, strlen(buffer));
+    return ESP_OK;
+}
+
+esp_err_t uart_protocol_send_help(void)
+{
+    const char *help =
+        "[HELP] Available commands:\n"
+        "[HELP]   AT+SCAN              - Start BLE scan\n"
+        "[HELP]   AT+SCANSTOP          - Stop BLE scan\n"
+        "[HELP]   AT+CONNECT=type,addr - Connect to device (type=0 public, 1 random)\n"
+        "[HELP]   AT+DISCONNECT        - Disconnect device\n"
+        "[HELP]   AT+HELP              - Show this help\n"
+        "[HELP]   CMD|SCAN_START|N     - Start scan (N=max devices, 0=unlimited)\n"
+        "[HELP]   CMD|BOSE_CONNECT|... - Connect via CMD protocol\n";
+    uart_safe_write(help, strlen(help));
     return ESP_OK;
 }

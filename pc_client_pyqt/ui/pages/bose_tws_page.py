@@ -252,13 +252,15 @@ class BoseTWSPage(QWidget):
         selected_items = self._device_table.selectedItems()
         if selected_items:
             row = selected_items[0].row()
-            mac = self._device_table.item(row, 1).text()
-            addr_type = int(self._device_table.item(row, 2).text())
-            self._connect_btn.setEnabled(False)
-            self._connection_status.setText("连接中...")
-            self._connection_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
-            self.add_log("INFO", f"正在连接设备: {mac}")
-            self.connect_device.emit(mac, addr_type)
+            if row < len(self._devices):
+                device = self._devices[row]
+                mac = device["mac"]
+                addr_type = device["addr_type"]
+                self._connect_btn.setEnabled(False)
+                self._connection_status.setText("连接中...")
+                self._connection_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
+                self.add_log("INFO", f"正在连接设备: {mac}")
+                self.connect_device.emit(mac, addr_type)
     
     def _on_disconnect_clicked(self):
         self._disconnect_btn.setEnabled(False)

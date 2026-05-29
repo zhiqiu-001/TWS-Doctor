@@ -2,54 +2,48 @@
  * @file uart_protocol.h
  * @brief 串口协议模块头文件
  * 
- * 该模块负责ESP32与PC上位机之间的串口通信协议，
- * 定义了数据格式和通信命令。
+ * 支持两种协议格式：
+ * 1. CMD| 格式（原有）：CMD|SCAN_START|..., CMD|BOSE_CONNECT|...
+ * 2. AT+ 格式（兼容 test 代码）：AT+SCAN, AT+CONNECT=type,addr, AT+DISCONNECT
  * 
- * 协议格式: TYPE|SUBTYPE|PARAM1|PARAM2|...\n
+ * 上位机 ← ESP32 消息:
+ * - SCAN|BLE|设备名称|MAC地址|ADDR_TYPE|RSSI    （原有）
+ * - [DEVICE] addr_type=0 addr=xx:xx:... rssi=-45 name=xxx （test 兼容）
+ * - [SCAN] Scanning started / [SCAN] Scanning stopped
+ * - [CONNECTED] conn_id=0 addr=xx:xx:...
+ * - [OPEN] ESP_GATTC_OPEN_EVT status=0
+ * - [DISCONNECTED] reason=0x...
+ * - [NOTIFY] handle=0xXXXX value=XX XX ...
+ * - [AUTH_OK] / [AUTH_FAIL] reason=...
+ * - [ERROR] ...
+ * - [INIT] ...
+ * - [HELP] ...
+ * - BOSE|CONNECTED|名称|型号    （原有）
+ * - BOSE|DISCONNECTED            （原有）
+ * - BOSE|BATT|左|右              （原有）
+ * - BOSE|FW|版本|型号            （原有）
+ * - LOG|标签|内容                （原有）
  * 
- * ESP32 → PC 消息:
- * - LOG|标签|消息内容
- * - SCAN|BLE|设备名称|MAC地址|RSSI
- * - SCAN|CLASSIC|设备名称|MAC地址|RSSI
- * - REPAIR|START
- * - REPAIR|SUCCESS
- * - REPAIR|FAILED|原因
- * - STATUS|SCANNING|数量
- * - STATUS|IDLE
- * - GATTC|CONNECTED
- * - GATTC|DISCONNECTED
- * - GATTC|SERVICE|UUID
- * - GATTC|CHAR|UUID|PROPS
- * - BOSE|CONNECTED|设备名称|设备型号
- * - BOSE|DISCONNECTED
- * - BOSE|BATT|左耳电量|右耳电量
- * - BOSE|FW|固件版本|设备型号
- * - BOSE|CLEAR_PAIRING|OK/FAIL
- * - BOSE|ERROR|错误信息
- * 
- * PC → ESP32 命令:
- * - CMD|SCAN_START|数量  (数量为0表示不限制)
- * - CMD|SCAN_STOP
- * - CMD|REPAIR_START|MAC地址
- * - CMD|REPAIR_STOP
- * - CMD|GATTC_CONNECT|MAC地址
- * - CMD|GATTC_DISCONNECT
- * - CMD|GATTC_READ|UUID
- * - CMD|GATTC_WRITE|UUID|HEX_DATA
- * - CMD|GATTC_NOTIFY|UUID|ENABLE
- * - CMD|BOSE_CONNECT|MAC地址
- * - CMD|BOSE_DISCONNECT
- * - CMD|BOSE_CLEAR_PAIRING
- * - CMD|BOSE_READ_BATT
- * - CMD|BOSE_READ_FW
+ * 上位机 → ESP32 命令:
+ * - AT+SCAN                        （兼容 test）
+ * - AT+SCANSTOP                    （兼容 test）
+ * - AT+CONNECT=type,addr           （兼容 test，如 AT+CONNECT=0,7c:df:a1:40:01:dd）
+ * - AT+DISCONNECT                  （兼容 test）
+ * - AT+HELP                        （兼容 test）
+ * - CMD|SCAN_START|数量             （原有）
+ * - CMD|SCAN_STOP                   （原有）
+ * - CMD|BOSE_CONNECT|MAC|type|name  （原有）
+ * - CMD|BOSE_DISCONNECT             （原有）
+ * - （其他原有 CMD| 命令保持不变）
  */
 
 #ifndef UART_PROTOCOL_H
 #define UART_PROTOCOL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
-#include "esp_gap_ble_api.h"   // 推荐加
+#include "esp_gap_ble_api.h"
 
 /**
  * @brief 串口命令类型枚举
@@ -69,6 +63,12 @@ typedef enum {
     CMD_BOSE_CLEAR_PAIRING, /*!< Bose 清空配对命令 */
     CMD_BOSE_READ_BATT,     /*!< Bose 读取电池命令 */
     CMD_BOSE_READ_FW,       /*!< Bose 读取固件命令 */
+    CMD_AT_SCAN,            /*!< AT+SCAN 命令 */
+    CMD_AT_SCANSTOP,        /*!< AT+SCANSTOP 命令 */
+    CMD_AT_CONNECT,         /*!< AT+CONNECT=type,addr 命令 */
+    CMD_AT_DISCONNECT,      /*!< AT+DISCONNECT 命令 */
+    CMD_AT_HELP,            /*!< AT+HELP 命令 */
+    CMD_PING,               /*!< 握手/探活命令，重新发送 [INIT] */
     CMD_UNKNOWN             /*!< 未知命令 */
 } uart_cmd_t;
 
@@ -78,7 +78,7 @@ typedef enum {
 typedef struct {
     int scan_count;        /*!< 扫描数量限制，0表示不限制 */
     char target_addr[18];  /*!< 目标设备MAC地址 */
-    uint8_t addr_type;   // ★新增这一行
+    uint8_t addr_type;     /*!< BLE 地址类型 */
 } uart_cmd_params_t;
 
 /**
@@ -88,6 +88,8 @@ typedef struct {
  */
 typedef void (*uart_cmd_callback_t)(uart_cmd_t cmd, uart_cmd_params_t *params);
 
+/* ======================== 初始化 ======================== */
+
 /**
  * @brief 初始化串口协议模块
  * @return ESP_OK: 成功, 其他: 失败
@@ -95,107 +97,96 @@ typedef void (*uart_cmd_callback_t)(uart_cmd_t cmd, uart_cmd_params_t *params);
 esp_err_t uart_protocol_init(void);
 
 /**
- * @brief 发送BLE扫描结果到上位机
- * @param name 设备名称
- * @param addr 设备MAC地址
- * @param addr_type BLE地址类型
- * @param rssi 信号强度
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, uint8_t addr_type, int rssi);
-
-/**
- * @brief 发送经典蓝牙扫描结果到上位机
- * @param name 设备名称
- * @param addr 设备MAC地址
- * @param rssi 信号强度
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_bt_classic_scan_result(const char *name, const char *addr, int rssi);
-
-/**
- * @brief 发送修复开始通知到上位机
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_repair_start(void);
-
-/**
- * @brief 发送修复成功通知到上位机
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_repair_success(void);
-
-/**
- * @brief 发送修复失败通知到上位机
- * @param reason 失败原因
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_repair_failed(const char *reason);
-
-/**
- * @brief 发送日志消息到上位机（协议格式）
- * @param tag 日志标签
- * @param message 日志消息
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_log(const char *tag, const char *message);
-
-/**
- * @brief 发送扫描状态到上位机
- * @param scanning 是否正在扫描
- * @param count 已扫描到的设备数量
- * @return ESP_OK: 成功, 其他: 失败
- */
-esp_err_t uart_protocol_send_scan_status(bool scanning, int count);
-
-/**
  * @brief 设置命令回调函数
  * @param callback 回调函数指针
  */
 void uart_protocol_set_callback(uart_cmd_callback_t callback);
 
-/**
- * @brief 发送Bose设备连接成功通知到上位机
- * @param name 设备名称
- * @param model 设备型号
- * @return ESP_OK: 成功, 其他: 失败
- */
+/* ======================== 原始 CMD| 格式输出（保留） ======================== */
+
+esp_err_t uart_protocol_send_ble_scan_result(const char *name, const char *addr, uint8_t addr_type, int rssi);
+esp_err_t uart_protocol_send_bt_classic_scan_result(const char *name, const char *addr, int rssi);
+esp_err_t uart_protocol_send_repair_start(void);
+esp_err_t uart_protocol_send_repair_success(void);
+esp_err_t uart_protocol_send_repair_failed(const char *reason);
+esp_err_t uart_protocol_send_log(const char *tag, const char *message);
+esp_err_t uart_protocol_send_scan_status(bool scanning, int count);
 esp_err_t uart_protocol_send_bose_connected(const char *name, const char *model);
-
-/**
- * @brief 发送Bose设备断开连接通知到上位机
- * @return ESP_OK: 成功, 其他: 失败
- */
 esp_err_t uart_protocol_send_bose_disconnected(void);
-
-/**
- * @brief 发送Bose设备电池信息到上位机
- * @param left_level 左耳电量百分比
- * @param right_level 右耳电量百分比
- * @return ESP_OK: 成功, 其他: 失败
- */
 esp_err_t uart_protocol_send_bose_battery(int left_level, int right_level);
-
-/**
- * @brief 发送Bose设备固件信息到上位机
- * @param version 固件版本号
- * @param model 设备型号
- * @return ESP_OK: 成功, 其他: 失败
- */
 esp_err_t uart_protocol_send_bose_firmware(const char *version, const char *model);
-
-/**
- * @brief 发送Bose设备清空配对结果到上位机
- * @param success 是否成功
- * @return ESP_OK: 成功, 其他: 失败
- */
 esp_err_t uart_protocol_send_bose_clear_pairing(bool success);
-
-/**
- * @brief 发送Bose设备错误信息到上位机
- * @param message 错误信息
- * @return ESP_OK: 成功, 其他: 失败
- */
 esp_err_t uart_protocol_send_bose_error(const char *message);
 
-#endif
+/* ======================== test 兼容 [xxx] 格式输出 ======================== */
+
+/**
+ * @brief 发送 [DEVICE] 格式的设备发现消息
+ * @param addr_type 地址类型（0=public, 1=random）
+ * @param addr MAC地址字符串，如 "7c:df:a1:40:01:dd"
+ * @param rssi 信号强度，如 -45
+ * @param name 设备名称，如 "ESP_BLE50_SERVER"
+ */
+esp_err_t uart_protocol_send_device_found(uint8_t addr_type, const char *addr, int rssi, const char *name);
+
+/**
+ * @brief 发送 [SCAN] 格式的扫描状态消息
+ * @param started true=扫描已开始, false=扫描已停止
+ */
+esp_err_t uart_protocol_send_scan_msg(bool started);
+
+/**
+ * @brief 发送 [CONNECTED] 格式的连接成功消息
+ * @param conn_id 连接ID
+ * @param addr 设备MAC地址
+ */
+esp_err_t uart_protocol_send_connected_msg(int conn_id, const char *addr);
+
+/**
+ * @brief 发送 [OPEN] 格式的 GATT open 事件消息
+ * @param status 状态码
+ */
+esp_err_t uart_protocol_send_open_msg(int status);
+
+/**
+ * @brief 发送 [DISCONNECTED] 格式的断开消息
+ * @param reason 断开原因（0x16=正常断开）
+ */
+esp_err_t uart_protocol_send_disconnected_msg(int reason);
+
+/**
+ * @brief 发送 [NOTIFY] 格式的通知消息
+ * @param handle 特征值句柄
+ * @param value 数据
+ * @param value_len 数据长度
+ */
+esp_err_t uart_protocol_send_notify_msg(uint16_t handle, const uint8_t *value, uint16_t value_len);
+
+/**
+ * @brief 发送 [AUTH_OK] 验证成功消息
+ * @param info 额外信息（可选）
+ */
+esp_err_t uart_protocol_send_auth_ok(const char *info);
+
+/**
+ * @brief 发送 [AUTH_FAIL] 验证失败消息
+ * @param reason 失败原因
+ */
+esp_err_t uart_protocol_send_auth_fail(const char *reason);
+
+/**
+ * @brief 发送 [ERROR] 错误消息
+ */
+esp_err_t uart_protocol_send_error_msg(const char *message);
+
+/**
+ * @brief 发送 [INIT] 初始化完成消息
+ */
+esp_err_t uart_protocol_send_init_msg(const char *message);
+
+/**
+ * @brief 发送 [HELP] 帮助信息
+ */
+esp_err_t uart_protocol_send_help(void);
+
+#endif /* UART_PROTOCOL_H */

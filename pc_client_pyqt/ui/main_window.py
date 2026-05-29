@@ -308,6 +308,9 @@ class MainWindow(QMainWindow):
         self._scan_page.set_scan_enabled(True)
         self._repair_page.set_enabled(True)
         self._bose_tws_page.set_scan_enabled(True)
+        
+        # 发送 PING 触发 ESP32 重新发送 [INIT]（串口打开可能错过启动时的 [INIT]）
+        self._send_command("CMD|PING")
         self.add_log("SUCCESS", f"串口 {port_name} 打开成功")
         self.add_log("SUCCESS", "ESP32 设备连接成功")
     
@@ -347,24 +350,7 @@ class MainWindow(QMainWindow):
         
         # 处理BLE扫描结果
         if packet_type == PacketType.SCAN_BLE:
-            # 检查是否已达到扫描数量限制
-            if hasattr(self, '_scan_count_limit') and len(self._devices) >= self._scan_count_limit:
-                return
-            
-            device = {
-                "name": data.get("name", "Unknown"),
-                "mac": data.get("addr", "").upper(),
-                "addr_type": data.get("addr_type", 0),
-                "rssi": data.get("rssi", 0),
-                "type": "BLE"
-            }
-            
-            # 检查是否已存在相同MAC的设备（去重）
-            if device["mac"] and not any(d['mac'] == device['mac'] for d in self._devices):
-                self._devices.append(device)
-                self.add_log("SCAN", f"发现设备: {device['name']} ({device['mac']})")
-                # 更新设备列表UI
-                self.update_devices_from_serial(self._devices)
+            self._add_device_from_data(data)
         
         # 处理扫描状态
         elif packet_type == PacketType.STATUS_SCANNING:
@@ -406,7 +392,40 @@ class MainWindow(QMainWindow):
         elif packet_type == PacketType.BOSE_ERROR:
             error_msg = data.get("message", "Unknown error")
             self._bose_tws_page.add_log("ERROR", f"Bose设备错误: {error_msg}")
-
+        
+        # [xxx] 格式消息
+        elif packet_type == PacketType.SCAN_STARTED:
+            self._scan_page.set_scanning(True)
+            self.add_log("INFO", "扫描已启动")
+        
+        elif packet_type == PacketType.SCAN_STOPPED:
+            self._scan_page.set_scanning(False)
+            self.add_log("INFO", "扫描已停止")
+        
+        elif packet_type == PacketType.DEVICE_FOUND:
+            self._add_device_from_data(data)
+        
+        elif packet_type == PacketType.INIT_READY:
+            self.add_log("SUCCESS", "ESP32 设备就绪")
+    
+    def _add_device_from_data(self, data):
+        """从解析后的数据中添加设备（去重）"""
+        if hasattr(self, '_scan_count_limit') and len(self._devices) >= self._scan_count_limit:
+            return
+        
+        device = {
+            "name": data.get("name", "Unknown") or "Unknown",
+            "mac": data.get("addr", "").upper(),
+            "addr_type": data.get("addr_type", 0),
+            "rssi": data.get("rssi", 0),
+            "type": "BLE"
+        }
+        
+        if device["mac"] and not any(d['mac'] == device['mac'] for d in self._devices):
+            self._devices.append(device)
+            self.add_log("SCAN", f"发现设备: {device['name']} ({device['mac']})")
+            self.update_devices_from_serial(self._devices)
+    
     # ========== 扫描相关 ==========
     def _on_scan_started(self, count):
         self._scanning = True
@@ -433,7 +452,6 @@ class MainWindow(QMainWindow):
         self._scan_page.update_devices(devices)
         self._repair_page.update_devices(devices)
         self._bose_tws_page.update_devices(devices)
-        self._scan_page.set_scanning(False)
 
     def _on_device_selected(self, mac):
         self._selected_device = mac

@@ -19,6 +19,7 @@
 #include "esp_gattc_api.h"
 #include "esp_gatt_common_api.h"
 #include "uart_protocol.h"
+#include "ble_scan.h"
 #include <string.h>
 
 /* 日志标签 */
@@ -48,6 +49,44 @@ static uint8_t g_service_count = 0;
 /* 回调函数 */
 static ble_gattc_state_callback_t g_state_cb = NULL;
 static ble_gattc_data_callback_t g_data_cb = NULL;
+
+/* 连接参数（与 test 代码一致） */
+static const esp_ble_conn_params_t phy_1m_conn_params = {
+    .scan_interval = 0x40,
+    .scan_window = 0x40,
+    .interval_min = 320,
+    .interval_max = 320,
+    .latency = 0,
+    .supervision_timeout = 600,
+    .min_ce_len  = 0,
+    .max_ce_len = 0,
+};
+static const esp_ble_conn_params_t phy_2m_conn_params = {
+    .scan_interval = 0x40,
+    .scan_window = 0x40,
+    .interval_min = 320,
+    .interval_max = 320,
+    .latency = 0,
+    .supervision_timeout = 600,
+    .min_ce_len  = 0,
+    .max_ce_len = 0,
+};
+static const esp_ble_conn_params_t phy_coded_conn_params = {
+    .scan_interval = 0x40,
+    .scan_window = 0x40,
+    .interval_min = 320,
+    .interval_max = 320,
+    .latency = 0,
+    .supervision_timeout = 600,
+    .min_ce_len  = 0,
+    .max_ce_len = 0,
+};
+
+/* pending target：延迟连接 — 等待下一次 EXT_ADV_REPORT 时立即连接 */
+static bool g_pending_target = false;
+static esp_bd_addr_t g_pending_target_addr = {0};
+static esp_ble_addr_type_t g_pending_target_addr_type = 0;
+static char g_pending_target_name[64] = {0};
 
 /**
  * @brief 打印 UUID
@@ -103,6 +142,70 @@ static void update_state(ble_gattc_state_t new_state)
     if (g_state_cb) {
         g_state_cb(g_state, g_target_addr);
     }
+}
+
+/**
+ * @brief 立即连接（匹配 test 代码的 connect_to_device 逻辑）
+ *
+ * 直接调用 esp_ble_gap_stop_ext_scan + esp_ble_gattc_enh_open(is_aux=true)
+ * 必须在扫描回调中或附近调用，不能延后。
+ */
+static void connect_now(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type)
+{
+    ESP_LOGI(TAG, "connect_now: addr_type=%d", addr_type);
+    ESP_LOGI(TAG, "  addr=" ESP_BD_ADDR_STR, ESP_BD_ADDR_HEX(addr));
+
+    update_state(BLE_GATTC_STATE_CONNECTING);
+    memcpy(g_target_addr, addr, sizeof(esp_bd_addr_t));
+
+    /* 
+     * is_aux=true 需要控制器内部的 AUX context 才能工作，
+     * 必须先调用 enh_open 再停止扫描 —— 不能反过来。
+     * 参考 test/ble50_sec_gattc_demo.c
+     */
+    esp_ble_gatt_creat_conn_params_t creat_conn_params = {0};
+    memcpy(&creat_conn_params.remote_bda, addr, ESP_BD_ADDR_LEN);
+    creat_conn_params.remote_addr_type = addr_type;
+    creat_conn_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
+    creat_conn_params.is_direct = true;
+    creat_conn_params.is_aux = true;
+    creat_conn_params.phy_mask = ESP_BLE_PHY_1M_PREF_MASK | ESP_BLE_PHY_2M_PREF_MASK | ESP_BLE_PHY_CODED_PREF_MASK;
+    creat_conn_params.phy_1m_conn_params = &phy_1m_conn_params;
+    creat_conn_params.phy_2m_conn_params = &phy_2m_conn_params;
+    creat_conn_params.phy_coded_conn_params = &phy_coded_conn_params;
+
+    esp_err_t ret = esp_ble_gattc_enh_open(g_gattc_if, &creat_conn_params);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "connect_now: esp_ble_gattc_enh_open failed: %s", esp_err_to_name(ret));
+        uart_protocol_send_error_msg("enh_open failed");
+        update_state(BLE_GATTC_STATE_IDLE);
+    } else {
+        esp_ble_gap_stop_ext_scan();
+    }
+}
+
+/**
+ * @brief 扩展广播报告回调（由 ble_scan 模块调用）
+ *
+ * 当有 pending target 时，检查本次报告是否匹配目标设备，
+ * 如果匹配则立即连接（在回调上下文中调用 connect_now）。
+ */
+static void on_ext_adv_report(esp_ble_gap_ext_adv_report_t *report)
+{
+    if (!g_pending_target) {
+        return;
+    }
+
+    if (memcmp(report->addr, g_pending_target_addr, ESP_BD_ADDR_LEN) != 0) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "on_ext_adv_report: found pending target, connecting now...");
+    ESP_LOGI(TAG, "  addr=" ESP_BD_ADDR_STR " rssi=%d",
+             ESP_BD_ADDR_HEX(report->addr), report->rssi);
+
+    g_pending_target = false;
+    connect_now(g_pending_target_addr, g_pending_target_addr_type);
 }
 
 /**
@@ -274,14 +377,25 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         case ESP_GATTC_OPEN_EVT: {
             ESP_LOGI(TAG, "ESP_GATTC_OPEN_EVT, status=%d, conn_id=%d, mtu=%d",
                      param->open.status, param->open.conn_id, param->open.mtu);
+
+            uart_protocol_send_open_msg(param->open.status);
+
             if (param->open.status == ESP_GATT_OK) {
                 g_conn_id = param->open.conn_id;
                 memcpy(g_target_addr, param->open.remote_bda, sizeof(esp_bd_addr_t));
                 update_state(BLE_GATTC_STATE_CONNECTED);
-                
+
+                /* 发送 [CONNECTED] 消息 */
+                char addr_str[18];
+                snprintf(addr_str, sizeof(addr_str),
+                         "%02x:%02x:%02x:%02x:%02x:%02x",
+                         g_target_addr[0], g_target_addr[1], g_target_addr[2],
+                         g_target_addr[3], g_target_addr[4], g_target_addr[5]);
+                uart_protocol_send_connected_msg(g_conn_id, addr_str);
+
                 /* 发送 Bose 连接成功通知到上位机 */
                 uart_protocol_send_bose_connected("Bose TWS Device", "Unknown");
-                
+
                 /* 开始发现服务 */
                 discover_all_services();
             } else {
@@ -298,8 +412,12 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
         }
         
         case ESP_GATTC_DISCONNECT_EVT: {
+            int reason = param->disconnect.reason;
             ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, conn_id=%d, reason=0x%x",
-                     param->disconnect.conn_id, param->disconnect.reason);
+                     param->disconnect.conn_id, reason);
+
+            uart_protocol_send_disconnected_msg(reason);
+
             g_conn_id = 0;
             g_is_connected = false;
             g_service_count = 0;
@@ -347,6 +465,10 @@ static void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
                 printf(" %02X", param->notify.value[i]);
             }
             printf("\n");
+
+            uart_protocol_send_notify_msg(param->notify.handle,
+                                          param->notify.value,
+                                          param->notify.value_len);
             
             /* 查找对应的 Characteristic 并调用回调 */
             if (g_data_cb) {
@@ -394,7 +516,32 @@ esp_err_t ble_gatt_client_init(void)
         return ret;
     }
 
+    /* 注册扩展广播报告回调 — 用于 pending target 机制 */
+    ble_scan_set_ext_report_callback(on_ext_adv_report);
+
     ESP_LOGI(TAG, "BLE GATT Client init success");
+
+    /* 设置安全参数（与 test 代码一致） */
+    {
+        uint32_t passkey = 0;
+        esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND;
+        esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;
+        uint8_t key_size = 16;
+        uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+        uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+
+        ESP_LOGI(TAG, "Security params configured: auth_req=%d, iocap=%d, key_size=%d",
+                 auth_req, iocap, key_size);
+    }
+
+    ESP_LOGI(TAG, "BLE GATT Client fully initialized (incl. security)");
     return ESP_OK;
 }
 
@@ -409,35 +556,68 @@ esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr, esp_ble_addr_type_t 
         ESP_LOGE(TAG, "GATT client not registered");
         return ESP_ERR_INVALID_STATE;
     }
-    
+
     memcpy(g_target_addr, addr, sizeof(esp_bd_addr_t));
     update_state(BLE_GATTC_STATE_CONNECTING);
-    
-    /* 打开 GATT 连接 - 使用增强型 API */
-    esp_ble_gatt_creat_conn_params_t conn_params = {
-        .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-        .remote_addr_type = addr_type,
-        .is_direct = true,
-        .is_aux = false,
-        .phy_mask = 0,
-    };
-    memcpy(conn_params.remote_bda, g_target_addr, sizeof(esp_bd_addr_t));
 
-    esp_err_t ret = esp_ble_gattc_enh_open(g_gattc_if, &conn_params);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ble_gattc_open failed: %s", esp_err_to_name(ret));
-        update_state(BLE_GATTC_STATE_IDLE);
-        return ret;
+    /* 直接用 connect_now — 匹配 test 代码 */
+    connect_now(addr, addr_type);
+    return ESP_OK;
+}
+
+esp_err_t ble_gatt_client_connect_ext(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type, const char *name)
+{
+    ESP_LOGI(TAG, "Connect Ext: addr_type=%d name=%s", addr_type, name ? name : "");
+    ESP_LOGI(TAG, "  addr=" ESP_BD_ADDR_STR, ESP_BD_ADDR_HEX(addr));
+
+    if (!g_gattc_registered) {
+        ESP_LOGE(TAG, "GATT client not registered");
+        return ESP_ERR_INVALID_STATE;
     }
-    
+
+    /* 如果已连接，先断开 */
+    if (g_is_connected) {
+        ESP_LOGW(TAG, "Already connected, disconnect first");
+        esp_ble_gattc_close(g_gattc_if, g_conn_id);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    memcpy(g_target_addr, addr, sizeof(esp_bd_addr_t));
+
+    /* 如果扫描正在运行，直接停止扫描并连接 */
+    if (ble_scan_is_scanning()) {
+        connect_now(addr, addr_type);
+    } else {
+        /* 扫描未运行：设置 pending target，重启扫描等待 EXT_ADV_REPORT */
+        ESP_LOGI(TAG, "Scan not running, setting pending target, restarting scan...");
+        g_pending_target = true;
+        memcpy(g_pending_target_addr, addr, sizeof(esp_bd_addr_t));
+        g_pending_target_addr_type = addr_type;
+        if (name) {
+            strncpy(g_pending_target_name, name, sizeof(g_pending_target_name) - 1);
+        } else {
+            g_pending_target_name[0] = '\0';
+        }
+        update_state(BLE_GATTC_STATE_CONNECTING);
+        ble_scan_start(0);
+    }
     return ESP_OK;
 }
 
 esp_err_t ble_gatt_client_disconnect(void)
 {
     ESP_LOGI(TAG, "Disconnecting...");
-    
-    if (g_conn_id == 0) {
+
+    /* 取消 pending target（扫描已停止，等待 EXT_ADV_REPORT 中连接） */
+    if (g_pending_target) {
+        ESP_LOGI(TAG, "Canceling pending target connect");
+        g_pending_target = false;
+        ble_scan_stop();
+        update_state(BLE_GATTC_STATE_IDLE);
+        return ESP_OK;
+    }
+
+    if (!g_is_connected) {
         ESP_LOGW(TAG, "Not connected");
         return ESP_ERR_INVALID_STATE;
     }

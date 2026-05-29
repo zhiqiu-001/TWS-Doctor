@@ -28,46 +28,7 @@ static const char *TAG = "APP_MAIN";
  */
 static void on_ble_scan_result(ble_device_t *device)
 {
-    /**
-     * 使用处理后的设备名称
-     */
-    const char *name =
-        device->name[0] ?
-        device->name :
-        "(unknown)";
-
-    /**
-     * 打印设备信息
-     */
-    ESP_LOGI(TAG,
-             "BLE device found: %s, %s, type=%d, rssi=%d dBm",
-             name,
-             device->addr,
-             device->addr_type,
-             device->rssi);
-
-    /**
-     * 打印原始 BDA
-     */
-    ESP_LOGI(TAG,
-             "Raw BDA: %02X:%02X:%02X:%02X:%02X:%02X",
-             device->bda[0],
-             device->bda[1],
-             device->bda[2],
-             device->bda[3],
-             device->bda[4],
-             device->bda[5]);
-
-    /**
-     * 地址类型解释
-     */
-    ESP_LOGI(TAG,
-             "Address type: %s",
-             device->addr_type == BLE_ADDR_TYPE_PUBLIC ?
-             "PUBLIC" :
-             "RANDOM");
-
-    /* 注：扫描结果已在 ble_scan.c 中发送，此处不再重复发送 */
+    (void)device;
 }
 
 /**
@@ -164,9 +125,7 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
                       &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
                 addr[0] = a0; addr[1] = a1; addr[2] = a2;
                 addr[3] = a3; addr[4] = a4; addr[5] = a5;
-                ble_scan_stop();
-                ble_scan_wait_for_stop(pdMS_TO_TICKS(1000));
-                ble_gatt_client_connect(addr, addr_type);
+                ble_gatt_client_connect_ext(addr, addr_type, NULL);
             } else {
                 ESP_LOGE(TAG, "Invalid MAC address format");
             }
@@ -205,9 +164,11 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
                       &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
                 addr[0] = a0; addr[1] = a1; addr[2] = a2;
                 addr[3] = a3; addr[4] = a4; addr[5] = a5;
-                ble_scan_stop();
-                ble_scan_wait_for_stop(pdMS_TO_TICKS(1000));
-                ble_gatt_client_connect(addr, addr_type);
+                /* 使用 pending target 机制：
+                 * 如果扫描正在运行，立即执行 connect_now(is_aux=true)；
+                 * 如果扫描已停止，重新启动扫描等待目标设备 EXT_ADV_REPORT，
+                 * 在回调中立即连接（is_aux=true 必须靠近 AUX context） */
+                ble_gatt_client_connect_ext(addr, addr_type, NULL);
             } else {
                 ESP_LOGE(TAG, "Invalid MAC address format");
                 uart_protocol_send_bose_error("Invalid MAC address format");
@@ -239,6 +200,55 @@ static void on_uart_command(uart_cmd_t cmd, uart_cmd_params_t *params)
             // TODO: 实现读取固件版本逻辑
             // 模拟返回固件数据（实际应用中需要读取 GATT characteristic）
             uart_protocol_send_bose_firmware("4.5.2", "Bose QuietComfort Earbuds");
+            break;
+        }
+        /* === AT+ 命令处理 === */
+        case CMD_AT_SCAN: {
+            ESP_LOGI(TAG, "AT+SCAN: starting scan");
+            ble_scan_start(0);
+            break;
+        }
+        case CMD_AT_SCANSTOP: {
+            ESP_LOGI(TAG, "AT+SCANSTOP: stopping scan");
+            ble_scan_stop();
+            break;
+        }
+        case CMD_AT_CONNECT: {
+            const char *addr_str = params ? params->target_addr : "";
+            uint8_t addr_type = params ? params->addr_type : 0;
+            ESP_LOGI(TAG, "AT+CONNECT: %s, type=%d", addr_str, addr_type);
+
+            esp_bd_addr_t addr = {0};
+            unsigned int a0, a1, a2, a3, a4, a5;
+            if (sscanf(addr_str, "%02x:%02x:%02x:%02x:%02x:%02x",
+                      &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
+                addr[0] = a0; addr[1] = a1; addr[2] = a2;
+                addr[3] = a3; addr[4] = a4; addr[5] = a5;
+                ble_gatt_client_connect_ext(addr, (esp_ble_addr_type_t)addr_type, "");
+            } else if (sscanf(addr_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                      &a0, &a1, &a2, &a3, &a4, &a5) == 6) {
+                addr[0] = a0; addr[1] = a1; addr[2] = a2;
+                addr[3] = a3; addr[4] = a4; addr[5] = a5;
+                ble_gatt_client_connect_ext(addr, (esp_ble_addr_type_t)addr_type, "");
+            } else {
+                ESP_LOGE(TAG, "Invalid MAC in AT+CONNECT");
+                uart_protocol_send_error_msg("Invalid MAC address");
+            }
+            break;
+        }
+        case CMD_AT_DISCONNECT: {
+            ESP_LOGI(TAG, "AT+DISCONNECT");
+            ble_gatt_client_disconnect();
+            break;
+        }
+        case CMD_AT_HELP: {
+            ESP_LOGI(TAG, "AT+HELP");
+            uart_protocol_send_help();
+            break;
+        }
+        case CMD_PING: {
+            ESP_LOGI(TAG, "PING received, re-sending [INIT]");
+            uart_protocol_send_init_msg("ESP32_TWS_Doctor ready");
             break;
         }
         default:
@@ -295,6 +305,7 @@ void app_main(void)
     uart_protocol_set_callback(on_uart_command);
 
     uart_protocol_send_log(TAG, "ESP32_TWS_Doctor ready");
+    uart_protocol_send_init_msg("ESP32_TWS_Doctor initialized successfully");
     ESP_LOGI(TAG, "System initialized, waiting for commands...");
 
     /* 主循环 */

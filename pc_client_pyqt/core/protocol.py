@@ -18,6 +18,12 @@ class PacketType(Enum):
     BOSE_CLEAR_PAIRING = "BOSE|CLEAR_PAIRING"
     BOSE_ERROR = "BOSE|ERROR"
     
+    # [xxx] 格式消息
+    SCAN_STARTED = "[SCAN] Scanning started"
+    SCAN_STOPPED = "[SCAN] Scanning stopped"
+    DEVICE_FOUND = "[DEVICE]"
+    INIT_READY = "[INIT]"
+    
     UNKNOWN = "UNKNOWN"
 
 
@@ -28,10 +34,18 @@ def parse_packet(data: str):
     
     if data.startswith("SCAN|BLE|"):
         parts = data.split("|")
-        if len(parts) >= 5:
+        if len(parts) >= 6:
             return PacketType.SCAN_BLE, {
                 "name": parts[2],
                 "addr": parts[3],
+                "addr_type": int(parts[4]),
+                "rssi": int(parts[5])
+            }
+        elif len(parts) >= 5:
+            return PacketType.SCAN_BLE, {
+                "name": parts[2],
+                "addr": parts[3],
+                "addr_type": 0,
                 "rssi": int(parts[4])
             }
     elif data.startswith("SCAN|CLASSIC|"):
@@ -89,5 +103,29 @@ def parse_packet(data: str):
         parts = data.split("|")
         error_msg = parts[2] if len(parts) >= 3 else "Unknown error"
         return PacketType.BOSE_ERROR, {"message": error_msg}
+    
+    # [xxx] 格式消息
+    elif data.startswith("[SCAN] Scanning started"):
+        return PacketType.SCAN_STARTED, None
+    elif data.startswith("[SCAN] Scanning stopped"):
+        return PacketType.SCAN_STOPPED, None
+    elif data.startswith("[DEVICE]"):
+        try:
+            rest = data[8:].strip()
+            info = {}
+            for pair in rest.split():
+                if '=' in pair:
+                    key, val = pair.split('=', 1)
+                    info[key] = val
+            return PacketType.DEVICE_FOUND, {
+                "addr_type": int(info.get("addr_type", 0)),
+                "addr": info.get("addr", ""),
+                "rssi": int(info.get("rssi", 0)),
+                "name": info.get("name", "")
+            }
+        except:
+            return PacketType.DEVICE_FOUND, None
+    elif data.startswith("[INIT]"):
+        return PacketType.INIT_READY, None
     
     return PacketType.UNKNOWN, data

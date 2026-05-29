@@ -58,6 +58,12 @@ typedef struct {
 typedef void (*ble_scan_callback_t)(ble_device_t *device);
 
 /**
+ * @brief BLE扩展广播报告回调函数类型
+ * @param report 扩展广播报告信息
+ */
+typedef void (*ble_scan_ext_report_callback_t)(esp_ble_gap_ext_adv_report_t *report);
+
+/**
  * @brief 初始化BLE扫描模块
  * @return ESP_OK: 成功, 其他: 失败
  */
@@ -93,6 +99,12 @@ esp_err_t ble_scan_wait_for_stop(TickType_t timeout);
  * @param callback 回调函数指针
  */
 void ble_scan_set_callback(ble_scan_callback_t callback);
+
+/**
+ * @brief 设置扩展广播报告回调函数
+ * @param callback 回调函数指针
+ */
+void ble_scan_set_ext_report_callback(ble_scan_ext_report_callback_t callback);
 
 /**
  * @brief 获取当前扫描状态

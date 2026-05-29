@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "esp_log.h"
 #include "esp_bt.h"
@@ -22,6 +23,7 @@
 static const char *TAG = "BLE_SCAN";
 
 static ble_scan_callback_t scan_callback = NULL;
+static ble_scan_ext_report_callback_t ext_report_callback = NULL;
 
 static bool scanning = false;
 
@@ -130,37 +132,21 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
             device.name[name_len] = '\0';
         }
 
-        ESP_LOGI(TAG,
-                 "Device found [%d/%d]: name='%s', addr=%s, rssi=%d",
-                 scan_count + 1,
-                 scan_count_limit > 0 ?
-                    scan_count_limit : 999,
-                 device.name[0] ?
-                    device.name : "(unknown)",
-                 device.addr,
-                 device.rssi);
-
         /**
-         * 发给上位机（只发送有名称的设备）
+         * 发给上位机（包含 [DEVICE] 格式，无论是否有名称）
          */
-        if (device.name[0]) {
-            ESP_LOGI(TAG,
-                    "Sending scan result to PC: "
-                    "SCAN|BLE|%s|%s|%d|%d",
-                    device.name,
-                    device.addr,
-                    device.addr_type,
-                    device.rssi);
-
-            uart_protocol_send_ble_scan_result(
-                device.name,
-                device.addr,
-                device.addr_type,
-                device.rssi
-            );
-        } else {
-            ESP_LOGI(TAG, "Skipping device without name: %s", device.addr);
-        }
+        uart_protocol_send_ble_scan_result(
+            device.name,
+            device.addr,
+            device.addr_type,
+            device.rssi
+        );
+        uart_protocol_send_device_found(
+            device.addr_type,
+            device.addr,
+            device.rssi,
+            device.name[0] ? device.name : "(no name)"
+        );
 
         /**
          * 回调
@@ -169,25 +155,50 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
             scan_callback(&device);
         }
 
+        if (ext_report_callback) {
+            ext_report_callback(report);
+        }
+
         scan_count++;
 
+        /* 达到扫描数量限制时自动停止（仅触发一次） */
+        if (scan_count_limit > 0 && scan_count >= scan_count_limit) {
+            ESP_LOGI(TAG, "Scan count limit reached (%d), stopping scan", scan_count_limit);
+            scan_count_limit = -1;
+            esp_ble_gap_stop_ext_scan();
+        }
+
+        break;
+    }
+
+    /**
+     * 扩展扫描开始完成事件
+     */
+    case ESP_GAP_BLE_EXT_SCAN_START_COMPLETE_EVT: {
+        ESP_LOGI(TAG, "BLE ext scan start complete");
+        uart_protocol_send_scan_msg(true);
+        break;
+    }
+
+    /**
+     * 扩展扫描停止完成事件
+     */
+    case ESP_GAP_BLE_EXT_SCAN_STOP_COMPLETE_EVT: {
+
+        ESP_LOGI(TAG,
+                 "BLE ext scan stop complete");
+
+        scan_stop_pending = false;
+
+        if (scan_stop_sem != NULL) {
+            xSemaphoreGive(scan_stop_sem);
+        }
+
         uart_protocol_send_scan_status(
-            true,
+            false,
             scan_count
         );
-
-        /**
-         * 达到数量限制
-         */
-        if (scan_count_limit > 0 &&
-            scan_count >= scan_count_limit &&
-            scanning) {
-
-            ESP_LOGI(TAG,
-                     "=== Scan count limit reached ===");
-
-            ble_scan_stop();
-        }
+        uart_protocol_send_scan_msg(false);
 
         break;
     }
@@ -211,6 +222,70 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
             scan_count
         );
 
+        break;
+    }
+
+    /* ========== Security / Auth 事件处理（来源于 test 代码） ========== */
+
+    case ESP_GAP_BLE_PASSKEY_REQ_EVT: {
+        ESP_LOGI(TAG, "ESP_GAP_BLE_PASSKEY_REQ_EVT");
+        esp_ble_passkey_reply(param->ble_security.ble_req.bd_addr, true, 0);
+        break;
+    }
+
+    case ESP_GAP_BLE_NC_REQ_EVT: {
+        ESP_LOGI(TAG, "ESP_GAP_BLE_NC_REQ_EVT, passkey=%" PRIu32,
+                 param->ble_security.key_notif.passkey);
+        esp_ble_confirm_reply(param->ble_security.ble_req.bd_addr, true);
+        break;
+    }
+
+    case ESP_GAP_BLE_PASSKEY_NOTIF_EVT: {
+        ESP_LOGI(TAG, "ESP_GAP_BLE_PASSKEY_NOTIF_EVT, passkey=%06" PRIu32,
+                 param->ble_security.key_notif.passkey);
+        break;
+    }
+
+    case ESP_GAP_BLE_KEY_EVT: {
+        const char *key_type_str;
+        switch (param->ble_security.ble_key.key_type) {
+            case ESP_LE_KEY_PENC:  key_type_str = "ESP_LE_KEY_PENC";  break;
+            case ESP_LE_KEY_PID:   key_type_str = "ESP_LE_KEY_PID";   break;
+            case ESP_LE_KEY_PCSRK: key_type_str = "ESP_LE_KEY_PCSRK"; break;
+            case ESP_LE_KEY_PLK:   key_type_str = "ESP_LE_KEY_PLK";   break;
+            case ESP_LE_KEY_LLK:   key_type_str = "ESP_LE_KEY_LLK";   break;
+            case ESP_LE_KEY_LENC:  key_type_str = "ESP_LE_KEY_LENC";  break;
+            case ESP_LE_KEY_LID:   key_type_str = "ESP_LE_KEY_LID";   break;
+            case ESP_LE_KEY_LCSRK: key_type_str = "ESP_LE_KEY_LCSRK"; break;
+            default:               key_type_str = "UNKNOWN";          break;
+        }
+        ESP_LOGI(TAG, "ESP_GAP_BLE_KEY_EVT, key_type=%s", key_type_str);
+        break;
+    }
+
+    case ESP_GAP_BLE_AUTH_CMPL_EVT: {
+        esp_ble_auth_cmpl_t *auth = &param->ble_security.auth_cmpl;
+        if (auth->success) {
+            ESP_LOGI(TAG, "ESP_GAP_BLE_AUTH_CMPL_EVT: success");
+            char bond_info[64];
+            snprintf(bond_info, sizeof(bond_info),
+                     "bd_addr=%02x:%02x:%02x:%02x:%02x:%02x",
+                     auth->bd_addr[0], auth->bd_addr[1], auth->bd_addr[2],
+                     auth->bd_addr[3], auth->bd_addr[4], auth->bd_addr[5]);
+            uart_protocol_send_auth_ok(bond_info);
+        } else {
+            ESP_LOGE(TAG, "ESP_GAP_BLE_AUTH_CMPL_EVT: fail, reason=0x%x",
+                     auth->fail_reason);
+            char fail_info[64];
+            snprintf(fail_info, sizeof(fail_info), "reason=0x%x", auth->fail_reason);
+            uart_protocol_send_auth_fail(fail_info);
+        }
+        break;
+    }
+
+    case ESP_GAP_BLE_SEC_REQ_EVT: {
+        ESP_LOGI(TAG, "ESP_GAP_BLE_SEC_REQ_EVT: accepting");
+        esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
         break;
     }
 
@@ -493,6 +568,15 @@ void ble_scan_set_callback(
     ble_scan_callback_t callback)
 {
     scan_callback = callback;
+}
+
+/**
+ * @brief 设置扩展广播报告回调
+ */
+void ble_scan_set_ext_report_callback(
+    ble_scan_ext_report_callback_t callback)
+{
+    ext_report_callback = callback;
 }
 
 /**

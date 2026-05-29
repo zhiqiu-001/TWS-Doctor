@@ -81,6 +81,15 @@ esp_err_t ble_gatt_client_init(void);
 esp_err_t ble_gatt_client_connect(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type);
 
 /**
+ * @brief 使用扩展 API 连接到指定设备（支持 BLE5 Extended Advertising is_aux=true）
+ * @param addr 目标设备 MAC 地址
+ * @param addr_type 目标设备地址类型（public/random）
+ * @param name 目标设备名称（可选，仅用于日志）
+ * @return ESP_OK: 发起连接成功, 其他: 失败
+ */
+esp_err_t ble_gatt_client_connect_ext(const esp_bd_addr_t addr, esp_ble_addr_type_t addr_type, const char *name);
+
+/**
  * @brief 断开连接
  * @return ESP_OK: 成功, 其他: 失败
  */
